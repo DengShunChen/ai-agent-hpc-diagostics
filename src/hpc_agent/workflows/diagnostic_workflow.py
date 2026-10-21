@@ -1,6 +1,7 @@
 """Diagnostic workflow, orchestrated with Microsoft Agent Framework.
 
-    Incident -> Triage Agent -> selected specialist agents -> RCA Coordinator -> DiagnosticRun
+    Incident -> Triage Agent -> selected specialist agents -> RCA Coordinator
+             -> Remediation Agent -> DiagnosticRun
     (Triage also sends to the coordinator, which then knows how many diagnoses to expect.)
 
 The framework only routes messages; agents stay plain Python. Any exception in an agent
@@ -14,13 +15,14 @@ import asyncio
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Never, Protocol
 
 from agent_framework import Executor, WorkflowBuilder, WorkflowContext, handler
 
 from hpc_agent.agents import GpuAgent, NetworkAgent, RCACoordinator, SchedulerAgent, StorageAgent, TriageAgent
-from hpc_agent.config import load_agent_tool_scopes
+from hpc_agent.agents.remediation import RemediationAgent
+from hpc_agent.config import load_agent_tool_scopes, load_site_profile
 from hpc_agent.models import (
     AgentDiagnosis,
     DiagnosticRun,
@@ -28,9 +30,12 @@ from hpc_agent.models import (
     HypothesisStatus,
     Incident,
     RCAResult,
+    RecommendedAction,
+    RemediationPlan,
     ToolInvocationRecord,
     TriageResult,
 )
+from hpc_agent.models.site import SiteProfile
 from hpc_agent.safety.guards import verify_run
 from hpc_agent.tools.gateway import CallBudget, ScopedGateway, ToolGateway
 
@@ -45,6 +50,18 @@ class Specialist(Protocol):
 class TriagedIncident:
     incident: Incident
     triage: TriageResult
+
+
+@dataclass(frozen=True)
+class Correlated:
+    rca: RCAResult
+    diagnoses: tuple[AgentDiagnosis, ...]
+
+
+@dataclass(frozen=True)
+class Remediated:
+    rca: RCAResult
+    plan: RemediationPlan
 
 
 class TriageExecutor(Executor):
@@ -83,16 +100,16 @@ class CoordinatorExecutor(Executor):
         self._diagnoses: list[AgentDiagnosis] = []
 
     @handler
-    async def on_triage(self, message: TriagedIncident, ctx: WorkflowContext[Never, RCAResult]) -> None:
+    async def on_triage(self, message: TriagedIncident, ctx: WorkflowContext[Correlated]) -> None:
         self._triaged = message
         await self._maybe_finish(ctx)
 
     @handler
-    async def on_diagnosis(self, message: AgentDiagnosis, ctx: WorkflowContext[Never, RCAResult]) -> None:
+    async def on_diagnosis(self, message: AgentDiagnosis, ctx: WorkflowContext[Correlated]) -> None:
         self._diagnoses.append(message)
         await self._maybe_finish(ctx)
 
-    async def _maybe_finish(self, ctx: WorkflowContext[Never, RCAResult]) -> None:
+    async def _maybe_finish(self, ctx: WorkflowContext[Correlated]) -> None:
         if self._triaged is None:
             return
         selected = self._triaged.triage.selected_agents
@@ -100,22 +117,37 @@ class CoordinatorExecutor(Executor):
         if len(self._diagnoses) < len(expected):
             return
         by_agent = {d.agent: d for d in self._diagnoses}
-        await ctx.yield_output(
-            self._coordinator.correlate(
-                self._triaged.incident,
-                self._triaged.triage,
-                [by_agent[a] for a in expected],
-                [a for a in selected if a not in self._implemented],
-            )
+        diagnoses = tuple(by_agent[a] for a in expected)
+        rca = self._coordinator.correlate(
+            self._triaged.incident,
+            self._triaged.triage,
+            list(diagnoses),
+            [a for a in selected if a not in self._implemented],
         )
+        await ctx.send_message(Correlated(rca, diagnoses))
+
+
+class RemediationExecutor(Executor):
+    """Adds remediation proposals (never executed) to the correlated RCA."""
+
+    def __init__(self, agent: RemediationAgent) -> None:
+        super().__init__(id=agent.name)
+        self._agent = agent
+
+    @handler
+    async def handle(self, message: Correlated, ctx: WorkflowContext[Never, Remediated]) -> None:
+        actions, plan = self._agent.plan(message.rca, message.diagnoses)
+        merged: list[RecommendedAction] = list(message.rca.recommended_actions)
+        merged += [a for a in actions if all(a.action != m.action for m in merged)]
+        await ctx.yield_output(Remediated(message.rca.model_copy(update={"recommended_actions": merged}), plan))
 
 
 def _select(message: TriagedIncident, target_ids: list[str]) -> list[str]:
     return [t for t in target_ids if t in message.triage.selected_agents]
 
 
-def default_specialists() -> list[Specialist]:
-    return [StorageAgent(), SchedulerAgent(), NetworkAgent(), GpuAgent()]
+def default_specialists(profile: SiteProfile) -> list[Specialist]:
+    return [StorageAgent(profile), SchedulerAgent(), NetworkAgent(), GpuAgent(profile)]
 
 
 async def run_diagnosis_async(
@@ -123,16 +155,21 @@ async def run_diagnosis_async(
     gateway: ToolGateway,
     scopes: Mapping[str, frozenset[str]] | None = None,
     specialists: Sequence[Specialist] | None = None,
+    profile: SiteProfile | None = None,
 ) -> DiagnosticRun:
     scopes = load_agent_tool_scopes() if scopes is None else scopes
-    specialists = default_specialists() if specialists is None else specialists
+    profile = load_site_profile() if profile is None else profile
+    specialists = default_specialists(profile) if specialists is None else specialists
     log: list[ToolInvocationRecord] = []
-    budget = CallBudget()
+    budget = CallBudget(profile.tool_call_budget)
     start = datetime.now(UTC)
 
     implemented = frozenset(a.name for a in specialists)
     triage_executor = TriageExecutor(TriageAgent())
-    coordinator = CoordinatorExecutor(RCACoordinator(), implemented)
+    coordinator = CoordinatorExecutor(
+        RCACoordinator(timedelta(minutes=profile.correlation_window_minutes)), implemented
+    )
+    remediation = RemediationExecutor(RemediationAgent(profile))
     workers = [SpecialistExecutor(a, ScopedGateway(gateway, a.name, scopes, log, budget)) for a in specialists]
     builder = (
         WorkflowBuilder(start_executor=triage_executor, output_from="all")
@@ -141,13 +178,14 @@ async def run_diagnosis_async(
     )
     for worker in workers:
         builder.add_edge(worker, coordinator)
+    builder.add_edge(coordinator, remediation)
     outputs = (await builder.build().run(incident)).get_outputs()
 
     triage = next(o for o in outputs if isinstance(o, TriageResult))
     by_agent = {o.agent: o for o in outputs if isinstance(o, AgentDiagnosis)}
-    rcas = [o for o in outputs if isinstance(o, RCAResult)]
-    if len(rcas) != 1:
-        raise RuntimeError(f"expected exactly one RCA result, got {len(rcas)}")
+    results = [o for o in outputs if isinstance(o, Remediated)]
+    if len(results) != 1:
+        raise RuntimeError(f"expected exactly one remediated RCA result, got {len(results)}")
     run = DiagnosticRun(
         run_id=f"run-{uuid.uuid4().hex[:12]}",
         incident_id=incident.incident_id,
@@ -156,8 +194,11 @@ async def run_diagnosis_async(
         triage=triage,
         diagnoses=[by_agent[a] for a in triage.selected_agents if a in by_agent],
         unavailable_agents=[a for a in triage.selected_agents if a not in implemented],
-        rca=rcas[0],
+        rca=results[0].rca,
+        remediation=results[0].plan,
         tools_invoked=log,
+        site=profile.site_id,
+        incident_reported_at=incident.timestamp,
     )
     verify_run(run, scopes)
     return run
@@ -168,8 +209,9 @@ def run_diagnosis(
     gateway: ToolGateway,
     scopes: Mapping[str, frozenset[str]] | None = None,
     specialists: Sequence[Specialist] | None = None,
+    profile: SiteProfile | None = None,
 ) -> DiagnosticRun:
-    return asyncio.run(run_diagnosis_async(incident, gateway, scopes, specialists))
+    return asyncio.run(run_diagnosis_async(incident, gateway, scopes, specialists, profile))
 
 
 def _tag(kind: EvidenceKind) -> str:
@@ -217,11 +259,20 @@ def render_report(run: DiagnosticRun) -> str:
     lines += [f"  - {m}" for m in rca.missing_information] or ["  none"]
     lines.append("\nRECOMMENDED CHECKS")
     lines += [f"  - {c}" for c in rca.recommended_checks] or ["  none"]
-    lines.append("\nRECOMMENDED ACTIONS (proposals only: require human approval, never executed)")
-    lines += [
-        f"  - {a.action} | risk={a.risk} | component={a.affected_component} | reason: {a.reason}"
-        for a in rca.recommended_actions
-    ] or ["  none"]
+    lines.append("\nREMEDIATION PLAN (remediation-agent; proposals only: require human approval, never executed)")
+    if run.remediation:
+        lines.append(f"  {run.remediation.summary}")
+    for a in rca.recommended_actions:
+        lines.append(f"  - {a.action} | risk={a.risk} | component={a.affected_component} | reason: {a.reason}")
+        lines += [f"       verify first: {v}" for v in a.verification]
+        if a.rollback:
+            lines.append(f"       rollback: {a.rollback}")
+        if a.reference:
+            lines.append(f"       reference: {a.reference}")
+    for d in (run.remediation.deferred if run.remediation else []):
+        lines.append(f"  deferred: {d.cause} ({d.confidence:.2f}): {d.reason}")
+    if not rca.recommended_actions and not run.remediation:
+        lines.append("  none")
     lines.append("\nREFERENCES (knowledge base: context only, not evidence about this incident)")
     lines += [f"  - {r.statement}   <{r.source}>" for r in rca.references] or ["  none"]
     lines.append("\nTOOLS INVOKED")

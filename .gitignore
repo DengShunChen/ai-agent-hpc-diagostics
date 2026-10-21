@@ -23,3 +23,7 @@ audit-data/
 # Editors
 .vscode/
 .idea/
+
+# Pilot exports contain operational data
+evaluation/pilot/*.csv
+!evaluation/pilot/pilot-template.csv

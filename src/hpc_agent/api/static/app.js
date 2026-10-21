@@ -169,6 +169,13 @@ function renderAction(action, index) {
   (action.missing_information.length ? action.missing_information : ["無"]).forEach((m) => mul.append(el("li", m)));
   missing.append(mul);
   add("缺少的資訊", missing);
+  const verify = el("dd");
+  const vul = el("ul");
+  (action.verification.length ? action.verification : ["無"]).forEach((v) => vul.append(el("li", v)));
+  verify.append(vul);
+  add("執行前驗證", verify);
+  add("回復方式", action.rollback || "無");
+  add("參考 SOP", action.reference || "無");
   box.append(dl);
   return box;
 }
@@ -231,6 +238,8 @@ async function openReview(runId) {
     fillList("review-hypotheses", review.hypotheses);
     $("review-actions").replaceChildren(
       ...(review.actions.length ? review.actions.map(renderAction) : [el("p", "沒有提出補救動作。")]));
+    $("review-remediation").textContent = review.remediation_summary || "";
+    fillList("review-deferred", review.deferred);
     fillList("review-missing", review.missing_information);
     fillList("review-checks", review.recommended_checks);
     $("review-note").textContent = reviewNote(review);

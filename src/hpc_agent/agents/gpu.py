@@ -11,7 +11,8 @@ import re
 from enum import StrEnum
 
 from hpc_agent.agents.evidence import dedupe, gather_references, incident_evidence, number, timestamp, tool_evidence
-from hpc_agent.models import AgentDiagnosis, Domain, Evidence, Incident, ProbableCause, RecommendedAction
+from hpc_agent.models import AgentDiagnosis, Domain, Evidence, Incident, ProbableCause
+from hpc_agent.models.site import DEFAULT_PROFILE, SiteProfile
 from hpc_agent.tools.gateway import ScopedGateway, ToolStatus
 
 
@@ -44,12 +45,14 @@ TELEMETRY = {
     "pcie_replay_count": "PCIe replay counter",
     "nvlink_errors": "NVLink error counter",
 }
-THERMAL_LIMIT_C = 85.0
 _CUDA_APP_ERROR = re.compile(r"illegal memory access|out of bounds|misaligned address|cuda error", re.IGNORECASE)
 
 
 class GpuAgent:
     name = "gpu-agent"
+
+    def __init__(self, profile: SiteProfile = DEFAULT_PROFILE) -> None:
+        self.thermal_limit_c = profile.gpu_thermal_limit_c
 
     def diagnose(self, incident: Incident, gateway: ScopedGateway) -> AgentDiagnosis:
         reported = incident_evidence(incident, Domain.GPU)
@@ -59,15 +62,15 @@ class GpuAgent:
         checks: list[str] = []
         components: list[str] = []
         causes: list[ProbableCause] = []
-        actions: list[RecommendedAction] = []
+        concerns: list[str] = []
         summary: list[str] = []
         telemetry_gaps = False
 
         def hypothesis(category: str, text: str, confidence: float, support: list[Evidence]) -> None:
             causes.append(
                 ProbableCause(
-                    cause=text, domain=Domain.GPU, category=category,
-                    supporting_evidence=support, confidence=confidence,
+                    cause=text, domain=Domain.GPU, category=category, supporting_evidence=support,
+                    confidence=confidence, components=list(concerns),
                 )
             )
 
@@ -96,6 +99,7 @@ class GpuAgent:
                     continue  # nothing reported against this GPU
 
                 components += [f"node:{node}", f"gpu:{node}/{index}"]
+                concerns[:] = [f"gpu:{node}/{index}", f"node:{node}"]
                 causes_before = len(causes)
                 state_ev = []
                 if isinstance(state, str):
@@ -122,7 +126,7 @@ class GpuAgent:
                         continue
                     item = tool_evidence(health, f"{label} {field}={value:g}")
                     evidence.append(item)
-                    if field == "temperature_c" and value >= THERMAL_LIMIT_C:
+                    if field == "temperature_c" and value >= self.thermal_limit_c:
                         hypothesis("gpu.thermal", f"Thermal condition on {label} may have contributed to the error",
                                    0.4, [item])
                     elif field == "ecc_dbe_volatile" and value > 0:
@@ -159,15 +163,6 @@ class GpuAgent:
                         0.5,
                         hw_support,
                     )
-                    actions.append(
-                        RecommendedAction(
-                            action=f"Drain {node} from scheduling pending operator-run GPU diagnostics",
-                            reason="Saved GPU data contains hardware-indicative errors",
-                            risk="medium",
-                            affected_component=label,
-                            supporting_evidence=hw_support,
-                        )
-                    )
                 if follow := by_class.get(XidClass.FOLLOW_ON):
                     missing.append(f"events preceding {', '.join(f'XID {x}' for x, _ in follow)} on {label}")
                 if len(causes) == causes_before and state_ev:
@@ -198,7 +193,6 @@ class GpuAgent:
             possible_causes=causes,
             affected_components=dedupe(components),
             recommended_checks=dedupe(checks),
-            recommended_actions=actions,
             missing_information=dedupe(missing),
             references=references,
             confidence=max((c.confidence for c in causes), default=0.0),

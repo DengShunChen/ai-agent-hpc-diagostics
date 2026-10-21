@@ -14,6 +14,8 @@
     hpc-agent create-operator-token NAME --tokens-file PATH   prints a new token once
     hpc-agent evaluate [--output docs/evaluation.md] [--approvals-log PATH]   score labelled cases
     hpc-agent explain RUN-ID [--operator NAME]        local-LLM explanation of a run (MODEL_PROVIDER=ollama)
+    hpc-agent metrics [--json]                        workflow timings per site (not MTTR)
+    hpc-agent compare-pilot FILE.csv [--min-n 10]     baseline vs assisted localization time / MTTR
 
 Decisions are recorded only; nothing is ever executed. On the CLI, --operator is an asserted
 identity; the HTTP API instead derives the operator from an authenticated bearer token.
@@ -51,6 +53,11 @@ def _parser() -> argparse.ArgumentParser:
         cmd.add_argument("--operator", required=True, help="human operator identity")
         cmd.add_argument("--comment", default="")
     sub.add_parser("verify-audit")
+    sub.add_parser("metrics", help="workflow timings and override rate per site").add_argument(
+        "--json", action="store_true")
+    pilot = sub.add_parser("compare-pilot", help="compare baseline vs assisted pilot periods")
+    pilot.add_argument("csv", type=Path)
+    pilot.add_argument("--min-n", type=int, default=10)
     explain = sub.add_parser("explain", help="ask the local LLM to explain a run's evidence")
     explain.add_argument("run_id")
     explain.add_argument("--operator", default=None)
@@ -85,6 +92,16 @@ def main(argv: list[str] | None = None) -> int:
     from hpc_agent.safety.operators import OperatorAuthError, OperatorTokens, issue_token
     from hpc_agent.workflows.approval_workflow import ApprovalService, default_state_dir, render_review
     from hpc_agent.workflows.diagnostic_workflow import render_report, run_diagnosis
+
+    if args.command == "compare-pilot":
+        from hpc_agent.evaluation import pilot as pilot_analysis
+
+        if args.min_n < 5:
+            print("error: --min-n below 5 is not allowed", file=sys.stderr)
+            return 2
+        incidents, problems = pilot_analysis.load(args.csv)
+        print(pilot_analysis.render(pilot_analysis.analyse(incidents, args.min_n), problems))
+        return 0
 
     if args.command == "evaluate":
         import json
@@ -171,6 +188,16 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"[{result.disclaimer}]")
             for reason in result.rejection_reasons:
                 print(f"  - {reason}")
+        elif args.command == "metrics":
+            from hpc_agent import metrics
+
+            summary = metrics.summarize(metrics.collect(service))
+            if args.json:
+                import json
+
+                print(json.dumps([m.model_dump() for m in summary], indent=2))
+            else:
+                print(metrics.render(summary))
         elif args.command == "verify-audit":
             print(f"audit.jsonl: {service.audit.verify()} records, chain OK")
             print(f"approvals.jsonl: {service.approvals.verify()} records, chain OK")

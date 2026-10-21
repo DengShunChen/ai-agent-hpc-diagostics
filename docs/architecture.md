@@ -175,6 +175,37 @@ including a comparison table across the three POC scenarios. Cause categories
 (`ProbableCause.category`, for example `storage.capacity`) give stable labels for scoring.
 Human override rates come only from recorded approval logs.
 
+## Remediation agent and site profiles
+
+```mermaid
+flowchart LR
+    T[Triage] --> S[storage / scheduler / network / GPU agents]
+    S --> C[RCA Coordinator]
+    C --> R[Remediation agent<br/>playbook + site threshold]
+    R --> P[DiagnosticRun<br/>rca.recommended_actions + remediation plan]
+    P --> H{Human approval}
+    SP[(config/sites/&lt;site&gt;.yaml)] -.thresholds.-> S
+    SP -.window.-> C
+    SP -.min confidence.-> R
+```
+
+- **Remediation agent** (`agents/remediation.py`):
+  - It proposes a `RecommendedAction` only for open, tool-backed hypotheses at or above
+    `remediation_min_confidence`, using its playbook. Each action carries the hypothesis
+    it addresses, the checks to verify first, a rollback and an SOP reference. The
+    affected components come from the hypothesis (`ProbableCause.components`).
+  - Every other open hypothesis is listed in `RemediationPlan.deferred`, with the reason.
+  - It has no tools, and the plan is typed `executes: false`. The diagnosis agents no
+    longer produce actions.
+- **Site profiles** (`models/site.py`, `config/sites/*.yaml`, selected by `HPC_AGENT_SITE`):
+  - They set the storage full and imbalance thresholds, the GPU thermal limit, the
+    correlation window, the call budget and the remediation confidence.
+  - Every value is bounded. There are no fields for policy, tools or approval, and unknown
+    fields are rejected.
+- **Workflow metrics** (`metrics.py`, `hpc-agent metrics`, `GET /api/metrics`): timings
+  and override rate per site, taken from the run snapshots and the approval log. These are
+  not MTTR.
+
 ## Design notes
 
 - **Evidence traceability**: every `Evidence` has a `kind` (incident report, tool result or

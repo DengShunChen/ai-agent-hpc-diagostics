@@ -206,6 +206,13 @@ def create_app(service: ApprovalService, tokens: OperatorTokens | None, llm: LLM
         latest = service.latest_explanation(run_id)
         return {"explanation": latest.model_dump(mode="json") if latest else None}
 
+    @app.get("/api/metrics")
+    def workflow_metrics(_: Operator) -> dict:
+        from hpc_agent import metrics
+
+        return {"note": metrics.NOT_MTTR,
+                "sites": [m.model_dump() for m in metrics.summarize(metrics.collect(service))]}
+
     @app.get("/api/audit/verify")
     def verify(_: Operator) -> dict:
         return {"audit_records": service.audit.verify(), "approval_records": service.approvals.verify(),

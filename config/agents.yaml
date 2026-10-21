@@ -21,3 +21,6 @@ agents:
   rca-coordinator:
     domain: coordination
     tools: []                   # correlates agent output only
+  remediation-agent:
+    domain: remediation
+    tools: []                   # proposes playbook actions from the RCA only; executes nothing

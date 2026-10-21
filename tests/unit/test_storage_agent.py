@@ -46,9 +46,8 @@ def test_full_ost_supports_capacity_hypothesis(tmp_path, scopes):
     assert "ost:OST0002" in d.affected_components
     assert d.confidence == 0.6
     assert "'No space left on device' (ENOSPC) or quota error in the job output" in d.missing_information
-    [action] = d.recommended_actions
-    assert action.affected_component == "OST0002"
-    assert action.supporting_evidence and all(e.kind is EvidenceKind.TOOL_RESULT for e in action.supporting_evidence)
+    assert d.possible_causes[0].components == ["ost:OST0002"]
+    assert d.recommended_actions == []  # remediation is the remediation agent's job
     assert "none is confirmed" in d.finding
 
 

@@ -76,6 +76,11 @@ class RecommendedAction(BaseModel):
     risk: RiskLevel
     affected_component: NonEmptyStr
     supporting_evidence: list[Evidence] = Field(default_factory=list)
+    # Set by the remediation agent's playbook:
+    addresses: str | None = None  # category of the hypothesis this action responds to
+    verification: list[NonEmptyStr] = Field(default_factory=list)  # checks a human does before acting
+    rollback: str | None = None
+    reference: str | None = None  # SOP id
 
 
 class HypothesisStatus(StrEnum):
@@ -91,6 +96,8 @@ class ProbableCause(BaseModel):
     domain: Domain | None = None
     # Stable label for comparison and evaluation, e.g. "storage.capacity", "gpu.application".
     category: str | None = Field(default=None, pattern=r"^[a-z]+(\.[a-z_]+)+$")
+    # Components this cause concerns, e.g. "ost:OST0002", "node:sim-node-0042", "gpu:node/3".
+    components: list[NonEmptyStr] = Field(default_factory=list)
     status: HypothesisStatus = HypothesisStatus.HYPOTHESIS
     supporting_evidence: list[Evidence] = Field(default_factory=list)
     conflicting_evidence: list[Evidence] = Field(default_factory=list)
@@ -188,3 +195,25 @@ class RCAResult(BaseModel):
         return next(
             (c for c in self.probable_causes if c.status is HypothesisStatus.CONFIRMED), None
         )
+
+
+class DeferredHypothesis(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    cause: NonEmptyStr
+    category: str | None = None
+    confidence: Confidence = 0.0
+    reason: NonEmptyStr
+
+
+class RemediationPlan(BaseModel):
+    """The remediation agent's proposal. Proposals only: nothing here is ever executed."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    agent: Literal["remediation-agent"] = "remediation-agent"
+    summary: NonEmptyStr
+    min_confidence: Confidence
+    deferred: list[DeferredHypothesis] = Field(default_factory=list)
+    executes: Literal[False] = False
+    human_approval_required: Literal[True] = True

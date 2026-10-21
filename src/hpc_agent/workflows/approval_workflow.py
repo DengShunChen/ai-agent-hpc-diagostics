@@ -95,6 +95,9 @@ def build_approval_request(run: DiagnosticRun, status: ApprovalStatus) -> Approv
                 affected_component=action.affected_component,
                 confidence=max(related, default=rca.confidence),
                 missing_information=rca.missing_information,
+                verification=action.verification,
+                rollback=action.rollback,
+                reference=action.reference,
             )
         )
     note = NOT_EXECUTED_NOTE
@@ -112,6 +115,9 @@ def build_approval_request(run: DiagnosticRun, status: ApprovalStatus) -> Approv
         missing_information=rca.missing_information,
         recommended_checks=rca.recommended_checks,
         actions=actions,
+        remediation_summary=run.remediation.summary if run.remediation else "",
+        deferred=[f"({d.confidence:.2f}) {d.cause}: {d.reason}" for d in run.remediation.deferred]
+        if run.remediation else [],
         note=note,
     )
 
@@ -285,11 +291,18 @@ def render_review(request: ApprovalRequest) -> str:
             f"      Risk:                {a.risk}",
             f"      Affected Component:  {a.affected_component}",
             f"      Confidence:          {a.confidence:.2f}",
+            "      Verify Before Acting:",
+            *([f"        - {v}" for v in a.verification] or ["        none"]),
+            f"      Rollback:            {a.rollback or 'n/a'}",
+            f"      Reference:           {a.reference or 'n/a'}",
             "      Missing Information:",
             *([f"        - {m}" for m in a.missing_information] or ["        none"]),
         ]
     if not request.actions:
         lines.append("  none")
+    if request.remediation_summary:
+        lines += ["\nREMEDIATION PLAN", f"  {request.remediation_summary}"]
+        lines += [f"  deferred: {d}" for d in request.deferred]
     lines += [
         "\nMISSING INFORMATION",
         *([f"  - {m}" for m in request.missing_information] or ["  none"]),

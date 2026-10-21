@@ -82,6 +82,9 @@ class ActionForReview(BaseModel):
     affected_component: NonEmptyStr
     confidence: float = Field(ge=0.0, le=1.0)
     missing_information: list[NonEmptyStr] = Field(default_factory=list)
+    verification: list[NonEmptyStr] = Field(default_factory=list)
+    rollback: str | None = None
+    reference: str | None = None
 
 
 class ApprovalRequest(BaseModel):
@@ -97,4 +100,6 @@ class ApprovalRequest(BaseModel):
     missing_information: list[NonEmptyStr] = Field(default_factory=list)
     recommended_checks: list[NonEmptyStr] = Field(default_factory=list)
     actions: list[ActionForReview] = Field(default_factory=list)
+    remediation_summary: str = ""
+    deferred: list[NonEmptyStr] = Field(default_factory=list)
     note: NonEmptyStr

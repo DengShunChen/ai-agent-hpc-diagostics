@@ -8,7 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from hpc_agent.models.audit import ToolInvocationRecord
-from hpc_agent.models.diagnosis import AgentDiagnosis, Evidence, RCAResult
+from hpc_agent.models.diagnosis import AgentDiagnosis, Evidence, RCAResult, RemediationPlan
 from hpc_agent.models.incident import IncidentId, NonEmptyStr
 from hpc_agent.models.triage import TriageResult
 
@@ -25,9 +25,13 @@ class DiagnosticRun(BaseModel):
     # Agents triage selected that are not implemented; their domains are unexamined.
     unavailable_agents: list[NonEmptyStr] = Field(default_factory=list)
     rca: RCAResult
+    remediation: RemediationPlan | None = None  # None only for runs recorded before the remediation agent
     tools_invoked: list[ToolInvocationRecord] = Field(default_factory=list)
     # Set when this run re-diagnoses an incident after a rejection or revision request.
     supersedes: NonEmptyStr | None = None
+    # Site whose profile was used, and when the incident was reported (for workflow metrics).
+    site: NonEmptyStr = "default"
+    incident_reported_at: datetime | None = None
     human_approval_required: Literal[True] = True
 
     @property

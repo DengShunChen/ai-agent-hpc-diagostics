@@ -14,6 +14,21 @@ assessment. A human then reviews it and decides what happens next.
 
 It is **not** an autonomous remediation platform.
 
+## Goals and where they stand
+
+The project aims to cut fault-localization time for cross-layer HPC/GPU incidents with
+collaborating triage, diagnosis and remediation agents. It keeps operations safe through
+human approval, is designed to roll out to other data-center operations teams in East
+Asia, and is meant to grow into a Uvance AIOps customer proposal.
+
+| Goal | What exists now | What is still needed |
+|---|---|---|
+| Multi-agent root-cause analysis across network, storage and scheduler layers | Triage, storage/scheduler/network/GPU diagnosis, RCA Coordinator, **remediation agent**, all coordinated by Microsoft Agent Framework | LLM-driven reasoning (the agents are rule-based software agents; see known limitations) |
+| Operational safety | Human approval, no execution path, allowlisted read-only tools, runtime guards, hash-chained audit | Production security review |
+| Shorter fault localization (Business Impact) | `hpc-agent metrics` (workflow timings, override rate), [measurement protocol](docs/business-impact.md) | Baseline and pilot measurement. **No reduction is claimed.** |
+| Rollout across sites (Replicability) | Site profiles (`config/sites/`), per-site metrics, a single container image, the [site rollout guide](docs/site-replication.md) | Read-only data adapters for each site; cases labelled by each site |
+| Uvance AIOps proposal | [Customer proposal draft](docs/aiops-proposal.md) (internal, with honest evidence status) | Pilot results and business/legal review |
+
 ## POC scope
 
 - Offline proof of concept on a single Rocky Linux 10 server.
@@ -76,6 +91,7 @@ See [docs/safety.md](docs/safety.md).
 | Network | ✅ Iteration 3 | NIC/bond/Ethernet status, interface errors, saved SNMP/monitoring data |
 | GPU | ✅ Iteration 3 | Saved DCGM-style health, XID/CUDA errors, memory, PCIe, NVLink, power, thermal |
 | RCA Coordinator | ✅ Iteration 3 | Correlate findings, rank hypotheses, record ruled-out causes and conflicting evidence, relate domains; never confirms |
+| Remediation (處置) | ✅ | Proposes playbook remediation, with pre-action verification, rollback and an SOP reference, only for tool-backed hypotheses at or above the site's confidence threshold; lists deferred hypotheses with reasons; no tools; never executes |
 
 ## Workflow and approval states
 
@@ -84,12 +100,17 @@ See [docs/safety.md](docs/safety.md).
 2. **Triage** classifies the incident and selects specialists.
 3. The selected **specialists** gather evidence through their scoped, read-only tools.
 4. The **RCA Coordinator** ranks the hypotheses, relates domains and builds the timeline.
-5. The **runtime guard** verifies the run's invariants.
-6. The run is saved, and its approval state moves
+5. The **remediation agent** proposes playbook actions for well-supported hypotheses and
+   defers the rest, giving a reason for each.
+6. The **runtime guard** verifies the run's invariants.
+7. The run is saved, and its approval state moves
    `DRAFT → DIAGNOSIS_COMPLETE → AWAITING_HUMAN_APPROVAL`.
-7. A **human** decides: APPROVED (then CLOSED), REJECTED or REVISION_REQUESTED. Rejection and
+8. A **human** decides: APPROVED (then CLOSED), REJECTED or REVISION_REQUESTED. Rejection and
    revision requests lead to REVISE, and the incident is re-diagnosed as a new run.
-8. Each step is written to the hash-chained audit trail. **Nothing is ever executed.**
+9. Each step is written to the hash-chained audit trail. **Nothing is ever executed.**
+
+Thresholds come from the **site profile** (`HPC_AGENT_SITE`, default `default`). Workflow
+metrics per site come from `hpc-agent metrics`.
 
 ## Repository structure
 
@@ -115,7 +136,9 @@ evaluation/cases/                   labelled synthetic evaluation cases
 tests/{unit,safety,scenarios}/
 containers/        Containerfile, requirements.lock (hash-locked)
 scripts/           run_tests, run_dev, run_api, demo, lock_requirements, podman_run, container_smoke_test
-docs/              architecture, safety, scenarios, evaluation (generated), demo
+docs/              architecture, safety, scenarios, evaluation (generated), demo,
+                   business-impact, site-replication, aiops-proposal (zh-TW)
+config/sites/      site profiles (diagnostic thresholds per site)
 audit-data/        runtime state and audit logs (git-ignored)
 ```
 

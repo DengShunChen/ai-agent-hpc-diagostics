@@ -1,0 +1,12 @@
+# Default site profile. Copy this file to config/sites/<site-id>.yaml for a new site and
+# select it with HPC_AGENT_SITE=<site-id>. Profiles tune diagnostic thresholds only; they
+# cannot change the safety policy, tool allowlist or approval rules.
+site_id: default
+description: Built-in defaults for the offline POC
+scheduler: slurm
+storage_full_pct: 95           # filesystem / OST utilization treated as full
+ost_imbalance_spread_pct: 20   # max-min OST utilization spread flagged as imbalance
+gpu_thermal_limit_c: 85        # GPU temperature flagged as a thermal condition
+correlation_window_minutes: 30 # observations this close to the incident count as concurrent
+tool_call_budget: 40           # max tool calls per diagnostic run (hard cap 200)
+remediation_min_confidence: 0.4   # tool-backed hypotheses below this get no remediation proposal (floor 0.3)

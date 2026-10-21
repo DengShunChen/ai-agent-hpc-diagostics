@@ -117,6 +117,21 @@ whose operation the policy denies are all rejected.
   exposes *all* host-loopback services to the container. `podman_run.sh` adds it only when
   `MODEL_PROVIDER` is set.
 
+## Remediation agent and site profiles
+
+- **Remediation agent.**
+  - It has no tools (an empty scope in `agents.yaml`, and a test checks the source never
+    touches the gateway or data adapter), and it never executes anything.
+  - Its proposals are fixed playbook text, and a test checks they contain no command
+    syntax.
+  - It only proposes for tool-backed hypotheses at or above the site threshold. A profile
+    can't set that threshold below 0.3.
+  - Every proposal still goes through human approval and `verify_run`, which requires tool
+    evidence for every action.
+- **Site profiles.** A profile tunes diagnostic thresholds only. Unknown keys (for example
+  `allow_shell`), out-of-range values, a budget above 200 and a mismatched `site_id` are
+  all rejected.
+
 ## Runtime guards
 
 - **Call budget**: each run allows at most 40 tool calls, shared by all agents. A runaway

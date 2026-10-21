@@ -16,12 +16,9 @@ from hpc_agent.models import (
     HypothesisStatus,
     Incident,
     ProbableCause,
-    RecommendedAction,
 )
+from hpc_agent.models.site import DEFAULT_PROFILE, SiteProfile
 from hpc_agent.tools.gateway import ScopedGateway, ToolStatus
-
-FULL_PCT = 95.0
-IMBALANCE_SPREAD_PCT = 20.0
 
 _WRITE_FAILURE = re.compile(r"\b(writ(e|es|ing)|no space left|enospc|quota)\b", re.IGNORECASE)
 _REPORTED_HIGH = re.compile(r"\b(utili[sz]ation|usage|capacity)\b.*\bhigh\b|\bfull\b", re.IGNORECASE)
@@ -32,7 +29,12 @@ _IO_ERROR = re.compile(r"\bi/o errors?\b", re.IGNORECASE)
 class StorageAgent:
     name = "storage-agent"
 
+    def __init__(self, profile: SiteProfile = DEFAULT_PROFILE) -> None:
+        self.full_pct = profile.storage_full_pct
+        self.imbalance_spread_pct = profile.ost_imbalance_spread_pct
+
     def diagnose(self, incident: Incident, gateway: ScopedGateway) -> AgentDiagnosis:
+        FULL_PCT = self.full_pct  # noqa: N806 (site threshold)
         reported = incident_evidence(incident, Domain.STORAGE)
         write_reports = [e for e in reported if _WRITE_FAILURE.search(e.statement)]
         high_reports = [e for e in reported if _REPORTED_HIGH.search(e.statement)]
@@ -45,6 +47,8 @@ class StorageAgent:
         components: list[str] = []
         capacity: list[Evidence] = []  # tool evidence of a full filesystem or OST
         full_components: list[str] = []
+        imbalance_components: list[str] = []
+        unhealthy_components: list[str] = []
         below_full: list[Evidence] = []  # tool evidence that capacity is not exhausted
         imbalance: list[Evidence] = []
         unhealthy: list[Evidence] = []
@@ -65,7 +69,7 @@ class StorageAgent:
                 evidence.append(item)
                 if used >= FULL_PCT:
                     capacity.append(item)
-                    full_components.append(name)
+                    full_components.append(f"filesystem:{name}")
                     components.append(f"filesystem:{name}")
                 else:
                     below_full.append(item)
@@ -77,6 +81,7 @@ class StorageAgent:
                 evidence.append(item)
                 if health.lower() != "healthy":
                     unhealthy.append(item)
+                    unhealthy_components.append(f"filesystem:{name}")
                     components.append(f"filesystem:{name}")
 
         osts = gateway.invoke("get_ost_usage", incident_id=incident.incident_id)
@@ -102,15 +107,16 @@ class StorageAgent:
                 )
                 evidence.append(item)
                 capacity.append(item)
-                full_components += [ost for ost, _ in full]
+                full_components += [f"ost:{ost}" for ost, _ in full]
                 components += [f"ost:{ost}" for ost, _ in full]
             low, high = min(p for _, p in measured), max(p for _, p in measured)
             item = tool_evidence(
                 osts, f"OST utilization ranges {low:g}%-{high:g}% across {len(measured)} OSTs", ost_time
             )
             evidence.append(item)
-            if high - low >= IMBALANCE_SPREAD_PCT:
+            if high - low >= self.imbalance_spread_pct:
                 imbalance.append(item)
+                imbalance_components.append(f"ost:{max(measured, key=lambda m: m[1])[0]}")
             if not full:
                 below_full.append(item)
         for ost, _, state in usage:
@@ -118,21 +124,22 @@ class StorageAgent:
                 item = tool_evidence(osts, f"{ost} state={state}", ost_time)
                 evidence.append(item)
                 unhealthy.append(item)
+                unhealthy_components.append(f"ost:{ost}")
                 components.append(f"ost:{ost}")
 
         if write_reports and incident.job_id:
             components.append(f"job:{incident.job_id}")
 
         causes: list[ProbableCause] = []
-        actions: list[RecommendedAction] = []
 
         def hypothesis(
-            category: str, text: str, confidence: float, support: list[Evidence], conflicts: list[Evidence] = ()
+            category: str, text: str, confidence: float, support: list[Evidence],
+            conflicts: list[Evidence] = (), concerns: list[str] = (),
         ) -> None:
             causes.append(
                 ProbableCause(
                     cause=text, domain=Domain.STORAGE, category=category, supporting_evidence=support,
-                    conflicting_evidence=list(conflicts), confidence=confidence,
+                    conflicting_evidence=list(conflicts), confidence=confidence, components=list(concerns),
                 )
             )
 
@@ -144,19 +151,10 @@ class StorageAgent:
                 else "Filesystem or OST capacity is near full",
                 0.6 if write_reports else 0.4,
                 write_reports + capacity,
+                concerns=dedupe(full_components),
             )
             if write_reports and not enospc_logged:
                 missing.append("'No space left on device' (ENOSPC) or quota error in the job output")
-            affected = ", ".join(dedupe(full_components))
-            actions.append(
-                RecommendedAction(
-                    action=f"Review and free capacity on {affected} following the site storage SOP",
-                    reason="Saved utilization data shows capacity at or above the full threshold",
-                    risk="medium",
-                    affected_component=affected,
-                    supporting_evidence=capacity,
-                )
-            )
         elif write_reports and fs_data is not None and measured and below_full:
             # Capacity was measured at both filesystem and OST level and is not exhausted.
             causes.append(
@@ -183,9 +181,11 @@ class StorageAgent:
                 "OST imbalance may cause writes to fail on the fullest OSTs even while the filesystem has free space",
                 0.4 if write_reports else 0.3,
                 write_reports + imbalance,
+                concerns=imbalance_components,
             )
         if unhealthy:
-            hypothesis("storage.health", "Degraded filesystem or OST health may be causing I/O failures", 0.5, unhealthy)
+            hypothesis("storage.health", "Degraded filesystem or OST health may be causing I/O failures", 0.5, unhealthy,
+                       concerns=unhealthy_components)
             checks.append("review OSS/MDS server logs and target states for the incident window")
         if io_errors:
             hypothesis(
@@ -209,7 +209,6 @@ class StorageAgent:
             possible_causes=causes,
             affected_components=dedupe(components),
             recommended_checks=dedupe(checks),
-            recommended_actions=actions,
             missing_information=dedupe(missing),
             references=references,
             confidence=max((c.confidence for c in open_causes), default=0.0),

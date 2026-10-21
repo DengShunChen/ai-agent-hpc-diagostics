@@ -47,11 +47,13 @@ class SchedulerAgent:
         components: list[str] = []
         summary: list[str] = []
 
-        def hypothesis(category: str, text: str, confidence: float, support: list[Evidence]) -> None:
+        def hypothesis(
+            category: str, text: str, confidence: float, support: list[Evidence], concerns: list[str] = ()
+        ) -> None:
             causes.append(
                 ProbableCause(
                     cause=text, domain=Domain.SCHEDULER, category=category,
-                    supporting_evidence=support, confidence=confidence,
+                    supporting_evidence=support, confidence=confidence, components=list(concerns),
                 )
             )
 
@@ -65,8 +67,8 @@ class SchedulerAgent:
             checks.append("get_job_status()")
         else:
             job_id = data.get("job_id") if isinstance(data.get("job_id"), str) else "job"
-            if job_id != "job":
-                components.append(f"job:{job_id}")
+            job_components = [f"job:{job_id}"] if job_id != "job" else []
+            components += job_components
             ended = timestamp(data.get("end_time"))
             state = data.get("state")
             state_ev: list[Evidence] = []
@@ -86,7 +88,7 @@ class SchedulerAgent:
                     signal = exit_code - 128
                     category = "application.crash" if signal in (6, 7, 11) else "scheduler.signal_termination"
                     hypothesis(category, _SIGNAL_CAUSES.get(signal, f"Job terminated by signal {signal}"), 0.3,
-                               state_ev + [exit_ev])
+                               state_ev + [exit_ev], job_components)
                     abnormal = True
                 elif exit_code > 0:
                     hypothesis(
@@ -95,6 +97,7 @@ class SchedulerAgent:
                         "should be checked before suspecting the scheduler",
                         0.3,
                         state_ev + [exit_ev],
+                        job_components,
                     )
                     checks.append("review job stdout/stderr for application errors")
             else:
@@ -107,7 +110,7 @@ class SchedulerAgent:
             elif el_s >= req_s:
                 item = tool_evidence(job, f"elapsed {elapsed} reached requested walltime {requested}")
                 evidence.append(item)
-                hypothesis("scheduler.walltime", "Job reached its walltime limit", 0.5, state_ev + [item])
+                hypothesis("scheduler.walltime", "Job reached its walltime limit", 0.5, state_ev + [item], job_components)
             else:
                 item = tool_evidence(job, f"elapsed {elapsed} is below requested walltime {requested}; "
                                           "walltime limit was not reached")
@@ -165,6 +168,7 @@ class SchedulerAgent:
                         "administrator action",
                         0.3,
                         [node_ev],
+                        [f"node:{name}"],
                     )
                     checks.append(f"review node health checks and system logs for {name} around the failure time")
 

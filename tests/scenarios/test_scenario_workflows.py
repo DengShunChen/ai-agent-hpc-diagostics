@@ -118,7 +118,7 @@ def test_report_separates_sections(diagnose, incident_id):
     report = render_report(diagnose(incident_id))
     for header in ["ROOT CAUSE: NOT CONFIRMED", "SUMMARY", "FACTS", "HYPOTHESES (ranked, unconfirmed)",
                    "RULED OUT", "TIMELINE", "CROSS-DOMAIN RELATIONSHIPS", "MISSING INFORMATION",
-                   "RECOMMENDED CHECKS", "RECOMMENDED ACTIONS (proposals only",
+                   "RECOMMENDED CHECKS", "REMEDIATION PLAN (remediation-agent; proposals only",
                    "REFERENCES (knowledge base: context only", "TOOLS INVOKED"]:
         assert header in report
 
@@ -161,3 +161,34 @@ def test_gpu_001_references_point_to_software_first(diagnose):
     assert reference_ids(run) == ["SOP-GPU-001", "SIM-HIST-0004", "MAN-GPU-XID"]
     assert "sim-gpu-node-0007 GPU 3 XID 13 count=1 (8 s before)" in " ".join(run.rca.cross_domain_relationships)
     assert not any("hardware fault" in c.cause for c in run.rca.probable_causes)
+
+
+# --- remediation agent (處置) -----------------------------------------------------------
+@pytest.mark.parametrize("incident_id,deferred", [
+    ("POC-STORAGE-001", {"storage.capacity"}),
+    ("POC-SCHEDULER-001", {"scheduler.signal_termination", "node.unhealthy"}),
+    ("POC-GPU-001", {"gpu.application"}),
+])
+def test_poc_scenarios_get_no_remediation_and_say_why(diagnose, incident_id, deferred):
+    run = diagnose(incident_id)
+    plan = run.remediation
+    assert run.rca.recommended_actions == []
+    assert plan.summary.startswith("No remediation proposed") and plan.executes is False
+    assert {d.category for d in plan.deferred} == deferred
+    assert all(d.reason for d in plan.deferred)
+
+
+def test_supported_storage_case_gets_playbook_remediation(tmp_path, scopes):
+    incident = {"incident_id": "SIM-REM-001", "severity": "high", "symptoms": ["job failed while writing output"]}
+    adapter = make_data_root(tmp_path, incident, {
+        "storage/filesystem_usage": {"filesystem": "simfs01", "used_pct": 83, "health": "healthy"},
+        "storage/ost_usage": {"osts": [{"ost": "OST0000", "used_pct": 80}, {"ost": "OST0001", "used_pct": 98}]},
+    })
+    run = run_diagnosis(adapter.load_incident("SIM-REM-001"), build_default_gateway(adapter), scopes)
+    actions = {a.addresses: a for a in run.rca.recommended_actions}
+    capacity = actions["storage.capacity"]
+    assert capacity.affected_component == "OST0001" and capacity.reference == "SOP-STOR-001"
+    assert capacity.verification and capacity.rollback
+    assert run.rca.confirmed_root_cause is None  # proposing remediation never confirms the cause
+    report = render_report(run)
+    assert "verify first:" in report and "reference: SOP-STOR-001" in report

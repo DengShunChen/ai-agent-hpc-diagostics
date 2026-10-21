@@ -26,8 +26,8 @@ class NetworkAgent:
         def hypothesis(category: str, text: str, confidence: float, support: list[Evidence]) -> None:
             causes.append(
                 ProbableCause(
-                    cause=text, domain=Domain.NETWORK, category=category,
-                    supporting_evidence=support, confidence=confidence,
+                    cause=text, domain=Domain.NETWORK, category=category, supporting_evidence=support,
+                    confidence=confidence, components=[f"interface:{label}", f"node:{node}"],
                 )
             )
 

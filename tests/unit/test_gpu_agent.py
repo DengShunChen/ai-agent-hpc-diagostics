@@ -62,8 +62,8 @@ def test_hardware_xid_gives_hypothesis_and_proposal(tmp_path, scopes, xid):
     [cause] = hardware_causes(d)
     assert "needed before any hardware conclusion" in cause.cause
     assert cause.confidence == 0.5
-    [action] = d.recommended_actions
-    assert action.action.startswith("Drain sim-gpu-node-0001") and action.risk == "medium"
+    assert cause.components == ["gpu:sim-gpu-node-0001/1", "node:sim-gpu-node-0001"]
+    assert d.recommended_actions == []  # remediation is the remediation agent's job
     assert "not confirmed" in d.finding
 
 

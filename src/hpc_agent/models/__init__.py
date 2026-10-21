@@ -4,6 +4,7 @@ from hpc_agent.models.approval import ActionForReview, ApprovalRecord, ApprovalR
 from hpc_agent.models.audit import AuditRecord, ToolInvocationRecord
 from hpc_agent.models.diagnosis import (
     AgentDiagnosis,
+    DeferredHypothesis,
     Domain,
     Evidence,
     EvidenceKind,
@@ -11,6 +12,7 @@ from hpc_agent.models.diagnosis import (
     ProbableCause,
     RCAResult,
     RecommendedAction,
+    RemediationPlan,
     RiskLevel,
 )
 from hpc_agent.models.incident import Incident, Severity
@@ -20,6 +22,7 @@ from hpc_agent.models.triage import TriageResult
 __all__ = [
     "ActionForReview",
     "AgentDiagnosis",
+    "DeferredHypothesis",
     "ApprovalRecord",
     "ApprovalRequest",
     "ApprovalStatus",
@@ -33,6 +36,7 @@ __all__ = [
     "ProbableCause",
     "RCAResult",
     "RecommendedAction",
+    "RemediationPlan",
     "RiskLevel",
     "Severity",
     "ToolInvocationRecord",

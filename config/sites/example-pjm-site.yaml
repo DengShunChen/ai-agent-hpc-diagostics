@@ -1,0 +1,11 @@
+# Synthetic example of a second site, showing how thresholds differ per site.
+# Not a real site: identifiers and values are illustrative only.
+site_id: example-pjm-site
+description: Example PJM/FEFS site with stricter storage and thermal thresholds
+scheduler: pjm
+storage_full_pct: 90
+ost_imbalance_spread_pct: 15
+gpu_thermal_limit_c: 80
+correlation_window_minutes: 20
+tool_call_budget: 40
+remediation_min_confidence: 0.4   # tool-backed hypotheses below this get no remediation proposal (floor 0.3)

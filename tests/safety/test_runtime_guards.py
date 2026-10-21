@@ -66,7 +66,7 @@ def test_call_budget_is_shared_and_enforced(gateway, scopes):
 
 
 def test_workflow_fails_closed_when_budget_too_small(adapter, gateway, scopes, monkeypatch):
-    monkeypatch.setattr("hpc_agent.workflows.diagnostic_workflow.CallBudget", lambda: CallBudget(limit=1))
+    monkeypatch.setattr("hpc_agent.workflows.diagnostic_workflow.CallBudget", lambda *_: CallBudget(limit=1))
     with pytest.raises(ToolNotAllowedError, match="budget exhausted"):
         run_diagnosis(adapter.load_incident("POC-STORAGE-001"), gateway, scopes)
 

@@ -23,8 +23,6 @@ from hpc_agent.models import (
     TriageResult,
 )
 
-# Observations this close to the incident time are treated as concurrent with it.
-CORRELATION_WINDOW = timedelta(minutes=30)
 # Applied to a hypothesis whose tool evidence was all observed after the window closed.
 LATE_EVIDENCE_FACTOR = 0.5
 
@@ -60,6 +58,10 @@ def _unique(items: Iterable[Evidence]) -> list[Evidence]:
 class RCACoordinator:
     name = "rca-coordinator"
 
+    def __init__(self, correlation_window: timedelta = timedelta(minutes=30)) -> None:
+        # Observations this close to the incident time are treated as concurrent with it.
+        self.correlation_window = correlation_window
+
     def correlate(
         self,
         incident: Incident,
@@ -70,7 +72,7 @@ class RCACoordinator:
         causes = [c for d in diagnoses for c in d.possible_causes]
         facts = _unique([*triage.available_evidence, *(e for d in diagnoses for e in d.evidence)])
         timeline = sorted((e for e in facts if e.observed_at is not None), key=lambda e: e.observed_at)
-        temporal, adjusted = self._temporal(incident, timeline, causes)
+        temporal, adjusted = self._temporal(incident, timeline, causes, self.correlation_window)
         causes = [adjusted.get(id(c), c) for c in causes]
         # Stable sort: equal confidence keeps triage/agent order.
         open_causes = sorted(
@@ -121,7 +123,7 @@ class RCACoordinator:
 
     @staticmethod
     def _temporal(
-        incident: Incident, timeline: list[Evidence], causes: list[ProbableCause]
+        incident: Incident, timeline: list[Evidence], causes: list[ProbableCause], window: timedelta
     ) -> tuple[list[str], dict[int, ProbableCause]]:
         """Relate timestamped observations to the incident time; down-weight late-only support."""
         if not timeline:
@@ -129,7 +131,7 @@ class RCACoordinator:
         if incident.timestamp is None:
             return [f"{len(timeline)} timestamped observation(s) cannot be related to the incident: "
                     "incident timestamp missing"], {}
-        start, window = incident.timestamp, CORRELATION_WINDOW
+        start = incident.timestamp
         within = [e for e in timeline if abs(e.observed_at - start) <= window]
         after = [e for e in timeline if e.observed_at - start > window]
         before = [e for e in timeline if start - e.observed_at > window]
