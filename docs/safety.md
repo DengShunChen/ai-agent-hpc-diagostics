@@ -112,9 +112,28 @@ human operator. APPROVED **records** a decision and executes nothing. Records ar
 and each transition creates a new record with `run_id`, `incident_id`, `status`,
 `operator`, `operator_comment` and a timezone-aware `timestamp`.
 
-Before approval, the UI (Iteration 5/6) must show the proposed action, the reason, the
-supporting evidence, the risk, the affected component, the confidence and the missing
-information. All of these are fields of `RecommendedAction` / `RCAResult`.
+`ApprovalService` (`workflows/approval_workflow.py`) is the only code that records
+decisions. It is enforced as follows:
+
+- **Human only.** Every decision, close and revise needs an operator that matches the human
+  identity rule. Agent, bot, system and AI-style names are refused.
+- **Justified.** REJECTED and REVISION_REQUESTED need a comment.
+- **No execution path.** The service has no execute, apply or remediate method, and making a
+  decision triggers no tool call (tested).
+- **Unreachable from agents.** Agents, tools and the diagnostic workflow never import the
+  approval module or the transition function (static test). Only `main.py` uses
+  `ApprovalService`.
+- **Re-validated history.** On every read, the approval history is replayed through the
+  state machine, so a record added to the log out of order is detected even when its hash
+  chain is valid.
+- **Fail before writing.** A comment containing credential-like content is rejected before
+  anything is written.
+
+Before deciding, the reviewer sees an `ApprovalRequest`. For each proposed action it shows
+the **proposed action, reason, supporting evidence, risk, affected component, confidence and
+missing information**, together with the summary, the unconfirmed hypotheses and the
+recommended checks. When there's no proposed action, the package says so: the decision then
+accepts or rejects the assessment and its checks.
 
 ## Credential handling
 
@@ -128,7 +147,20 @@ information. All of these are fields of `RecommendedAction` / `RCAResult`.
 `AuditRecord` covers the run ID, incident ID, workflow stage, agents, tool invocations
 (tool, agent, result status, evidence reference, duration), evidence used, diagnosis,
 recommendations, approval status and operator comment. Records are immutable and are
-rejected if they contain credential-like content. Append-only persistence comes in Iteration 5.
+rejected if they contain credential-like content. They also record the `operator` for
+human decisions.
+
+Persistence (`logging/audit_logger.py`):
+
+- `audit.jsonl` and `approvals.jsonl` are append-only JSON Lines files. Each line holds `seq`,
+  `prev_hash`, `hash` and `record`, where `hash = sha256(prev_hash + canonical record)`.
+- Appends take an exclusive lock and are fsync'd. Nothing ever rewrites or truncates a file.
+- `verify()` detects edited, reordered, deleted or garbage lines. It can't detect records
+  removed from the end of the file; for that, the latest hash needs an external anchor.
+- Run snapshots are write-once (`O_EXCL`) under `runs/`, and run IDs are pattern-checked to
+  prevent path traversal.
+- State files are created with mode 0600. The state directory may not be inside a read-only
+  data root.
 
 ## Fail-closed behavior
 

@@ -1,6 +1,6 @@
 """Pydantic data models."""
 
-from hpc_agent.models.approval import ApprovalRecord, ApprovalStatus
+from hpc_agent.models.approval import ActionForReview, ApprovalRecord, ApprovalRequest, ApprovalStatus
 from hpc_agent.models.audit import AuditRecord, ToolInvocationRecord
 from hpc_agent.models.diagnosis import (
     AgentDiagnosis,
@@ -18,8 +18,10 @@ from hpc_agent.models.run import DiagnosticRun
 from hpc_agent.models.triage import TriageResult
 
 __all__ = [
+    "ActionForReview",
     "AgentDiagnosis",
     "ApprovalRecord",
+    "ApprovalRequest",
     "ApprovalStatus",
     "AuditRecord",
     "DiagnosticRun",

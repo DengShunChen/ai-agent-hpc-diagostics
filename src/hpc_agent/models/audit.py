@@ -35,6 +35,7 @@ class AuditRecord(BaseModel):
     diagnosis: str = ""
     recommendations: list[NonEmptyStr] = Field(default_factory=list)
     approval_status: ApprovalStatus = ApprovalStatus.DRAFT
+    operator: str | None = None
     operator_comment: str = ""
 
     @model_validator(mode="after")

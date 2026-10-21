@@ -114,6 +114,29 @@ flowchart LR
 - **Never confirms.** Specialists can't confirm (enforced by the model), and the coordinator
   doesn't. A static test checks that no agent or workflow code sets `CONFIRMED`.
 
+## Components added in Iteration 5
+
+| Component | Module |
+|---|---|
+| `ApprovalRequest`, `ActionForReview`; `AuditRecord.operator`; `DiagnosticRun.supersedes` | `models/approval.py`, `models/audit.py`, `models/run.py` |
+| Approval service, run store, review rendering | `workflows/approval_workflow.py` |
+| Hash-chained append-only log | `logging/audit_logger.py` |
+| Operator CLI (`review`, `approve`, `reject`, `request-revision`, `revise`, `close`, `history`, `verify-audit`) | `main.py` |
+
+```mermaid
+stateDiagram-v2
+    [*] --> DRAFT: diagnose (system)
+    DRAFT --> DIAGNOSIS_COMPLETE
+    DIAGNOSIS_COMPLETE --> AWAITING_HUMAN_APPROVAL
+    AWAITING_HUMAN_APPROVAL --> APPROVED: human
+    AWAITING_HUMAN_APPROVAL --> REJECTED: human + comment
+    AWAITING_HUMAN_APPROVAL --> REVISION_REQUESTED: human + comment
+    APPROVED --> CLOSED: human
+    REJECTED --> REVISE: human
+    REVISION_REQUESTED --> REVISE: human
+    REVISE --> [*]: new run (supersedes)
+```
+
 ## Design notes
 
 - **Evidence traceability**: every `Evidence` has a `kind` (incident report, tool result or

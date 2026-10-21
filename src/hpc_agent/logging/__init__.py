@@ -1,4 +1,1 @@
-"""Audit logging.
-
-Not implemented in Iteration 1. Planned for Iteration 5.
-"""
+"""Append-only, hash-chained audit and approval logs."""

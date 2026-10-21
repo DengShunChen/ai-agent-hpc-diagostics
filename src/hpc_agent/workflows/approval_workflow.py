@@ -1,0 +1,255 @@
+"""Human-in-the-loop approval workflow and audit trail.
+
+    diagnose -> DRAFT -> DIAGNOSIS_COMPLETE -> AWAITING_HUMAN_APPROVAL
+    human:     APPROVED -> CLOSED
+               REJECTED | REVISION_REQUESTED -> REVISE -> new run (supersedes the old one)
+
+APPROVED records a human decision only. This module has no way to execute an action,
+and agents never receive a reference to it: only the human-facing CLI/API calls decide().
+State lives under a writable state directory, separate from the read-only data roots:
+    runs/<run_id>.json   write-once run snapshots
+    approvals.jsonl      hash-chained approval transitions
+    audit.jsonl          hash-chained AuditRecords
+"""
+
+from __future__ import annotations
+
+import os
+import re
+from collections.abc import Mapping
+from pathlib import Path
+
+from hpc_agent.data_adapter import ALLOWED_DIRS, ReadOnlyDataAdapter, default_data_root
+from hpc_agent.logging.audit_logger import AppendOnlyLog
+from hpc_agent.models import (
+    ActionForReview,
+    ApprovalRecord,
+    ApprovalRequest,
+    ApprovalStatus,
+    AuditRecord,
+    DiagnosticRun,
+    HypothesisStatus,
+    Incident,
+)
+from hpc_agent.models.approval import HUMAN_DECISION_STATUSES, is_human_operator
+from hpc_agent.safety.approval import InvalidTransitionError, transition
+from hpc_agent.tools.gateway import ToolGateway
+from hpc_agent.workflows.diagnostic_workflow import run_diagnosis
+
+S = ApprovalStatus
+_RUN_ID = re.compile(r"run-[0-9a-f]{12}")
+COMMENT_REQUIRED = frozenset({S.REJECTED, S.REVISION_REQUESTED})
+NOT_EXECUTED_NOTE = "APPROVED records a human decision only; this platform executes nothing."
+
+
+class UnknownRunError(KeyError):
+    def __str__(self) -> str:
+        return f"unknown run: {self.args[0]!r}"
+
+
+def default_state_dir() -> Path:
+    override = os.environ.get("HPC_AGENT_STATE_DIR")
+    return Path(override) if override else default_data_root() / "audit-data"
+
+
+class RunStore:
+    """Write-once JSON snapshots of diagnostic runs."""
+
+    def __init__(self, directory: Path) -> None:
+        self._dir = directory
+
+    def _path(self, run_id: str) -> Path:
+        if not _RUN_ID.fullmatch(run_id):
+            raise UnknownRunError(run_id)
+        return self._dir / f"{run_id}.json"
+
+    def save(self, run: DiagnosticRun) -> None:
+        self._dir.mkdir(parents=True, exist_ok=True)
+        fd = os.open(self._path(run.run_id), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)  # never overwrite
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(run.model_dump_json(indent=2))
+
+    def load(self, run_id: str) -> DiagnosticRun:
+        path = self._path(run_id)
+        if not path.is_file():
+            raise UnknownRunError(run_id)
+        return DiagnosticRun.model_validate_json(path.read_text(encoding="utf-8"))
+
+
+def build_approval_request(run: DiagnosticRun, status: ApprovalStatus) -> ApprovalRequest:
+    rca = run.rca
+    open_causes = [c for c in rca.probable_causes if c.status is HypothesisStatus.HYPOTHESIS]
+    actions = []
+    for action in rca.recommended_actions:
+        related = [c.confidence for c in open_causes if set(c.supporting_evidence) & set(action.supporting_evidence)]
+        actions.append(
+            ActionForReview(
+                proposed_action=action.action,
+                reason=action.reason,
+                supporting_evidence=action.supporting_evidence,
+                risk=action.risk,
+                affected_component=action.affected_component,
+                confidence=max(related, default=rca.confidence),
+                missing_information=rca.missing_information,
+            )
+        )
+    note = NOT_EXECUTED_NOTE
+    if not actions:
+        note += (" No remediation action is proposed: a decision accepts or rejects the assessment and its "
+                 "recommended checks.")
+    return ApprovalRequest(
+        run_id=run.run_id,
+        incident_id=run.incident_id,
+        status=status,
+        classification=rca.classification,
+        summary=rca.summary,
+        confidence=rca.confidence,
+        hypotheses=[f"({c.domain}, {c.confidence:.2f}) {c.cause}" for c in open_causes],
+        missing_information=rca.missing_information,
+        recommended_checks=rca.recommended_checks,
+        actions=actions,
+        note=note,
+    )
+
+
+class ApprovalService:
+    def __init__(
+        self,
+        state_dir: Path,
+        adapter: ReadOnlyDataAdapter,
+        gateway: ToolGateway,
+        scopes: Mapping[str, frozenset[str]] | None = None,
+    ) -> None:
+        resolved = state_dir.resolve()
+        data_root = adapter.root
+        if any(resolved.is_relative_to((data_root / d).resolve()) for d in ALLOWED_DIRS):
+            raise ValueError("state directory must not be inside a read-only data root")
+        self._adapter = adapter
+        self._gateway = gateway
+        self._scopes = scopes
+        self.runs = RunStore(resolved / "runs")
+        self.approvals = AppendOnlyLog(resolved / "approvals.jsonl")
+        self.audit = AppendOnlyLog(resolved / "audit.jsonl")
+
+    # --- diagnosis -----------------------------------------------------------------
+    def diagnose(self, incident: Incident, supersedes: str | None = None) -> DiagnosticRun:
+        run = run_diagnosis(incident, self._gateway, self._scopes)
+        if supersedes:
+            run = run.model_copy(update={"supersedes": supersedes})
+        self.runs.save(run)
+        record = ApprovalRecord(run_id=run.run_id, incident_id=run.incident_id, status=S.DRAFT)
+        self._record_transition(record)
+        for status in (S.DIAGNOSIS_COMPLETE, S.AWAITING_HUMAN_APPROVAL):
+            record = transition(record, status)
+            self._record_transition(record)
+        rca = run.rca
+        self.audit.append(
+            AuditRecord(
+                run_id=run.run_id,
+                incident_id=run.incident_id,
+                start_time=run.start_time,
+                end_time=run.end_time,
+                workflow_stage=S.AWAITING_HUMAN_APPROVAL,
+                agents_invoked=["triage-agent", *(d.agent for d in run.diagnoses), "rca-coordinator"],
+                tools_invoked=run.tools_invoked,
+                evidence_used=[e.source for e in rca.facts] + [r.source for r in rca.references],
+                diagnosis=rca.summary,
+                recommendations=[*rca.recommended_checks, *(a.action for a in rca.recommended_actions)],
+                approval_status=S.AWAITING_HUMAN_APPROVAL,
+                operator_comment=f"supersedes {supersedes}" if supersedes else "",
+            ).model_dump(mode="json")
+        )
+        return run
+
+    # --- review --------------------------------------------------------------------
+    def history(self, run_id: str) -> list[ApprovalRecord]:
+        records = [ApprovalRecord.model_validate(r) for r in self.approvals.records() if r["run_id"] == run_id]
+        if not records:
+            raise UnknownRunError(run_id)
+        if records[0].status is not S.DRAFT:
+            raise InvalidTransitionError(f"{run_id}: history does not start at DRAFT")
+        for previous, current in zip(records, records[1:]):
+            transition(previous, current.status, current.operator, current.operator_comment)  # re-validate
+        return records
+
+    def status(self, run_id: str) -> ApprovalRecord:
+        return self.history(run_id)[-1]
+
+    def review(self, run_id: str) -> ApprovalRequest:
+        return build_approval_request(self.runs.load(run_id), self.status(run_id).status)
+
+    # --- human decisions -----------------------------------------------------------
+    def decide(self, run_id: str, decision: ApprovalStatus, operator: str, comment: str = "") -> ApprovalRecord:
+        decision = S(decision)
+        if decision not in HUMAN_DECISION_STATUSES:
+            raise InvalidTransitionError(f"{decision} is not a human decision")
+        if decision in COMMENT_REQUIRED and not comment.strip():
+            raise ValueError(f"{decision} requires an operator comment explaining why")
+        return self._advance(run_id, decision, operator, comment)
+
+    def close(self, run_id: str, operator: str, comment: str = "") -> ApprovalRecord:
+        return self._advance(run_id, S.CLOSED, operator, comment)
+
+    def revise(self, run_id: str, operator: str, comment: str = "") -> DiagnosticRun:
+        """Mark a rejected run for revision and re-diagnose the incident as a new run."""
+        self._advance(run_id, S.REVISE, operator, comment)
+        incident = self._adapter.load_incident(self.runs.load(run_id).incident_id)
+        return self.diagnose(incident, supersedes=run_id)
+
+    def _advance(self, run_id: str, status: ApprovalStatus, operator: str, comment: str) -> ApprovalRecord:
+        if not operator or not is_human_operator(operator):
+            raise ValueError(f"{status} requires a human operator identity")
+        record = transition(self.status(run_id), status, operator, comment)
+        audit = AuditRecord(
+            run_id=run_id,
+            incident_id=record.incident_id,
+            start_time=record.timestamp,
+            end_time=record.timestamp,
+            workflow_stage=status,
+            approval_status=status,
+            operator=operator,
+            operator_comment=comment,
+        )  # validated (incl. credential scan) before anything is written
+        self._record_transition(record)
+        self.audit.append(audit.model_dump(mode="json"))
+        return record
+
+    def _record_transition(self, record: ApprovalRecord) -> None:
+        self.approvals.append(record.model_dump(mode="json"))
+
+
+def render_review(request: ApprovalRequest) -> str:
+    lines = [
+        f"APPROVAL REVIEW  run {request.run_id}  incident {request.incident_id}",
+        f"STATUS: {request.status}",
+        f"CLASSIFICATION: {request.classification}   OVERALL CONFIDENCE: {request.confidence:.2f}",
+        "",
+        "SUMMARY",
+        f"  {request.summary}",
+        "\nHYPOTHESES (unconfirmed)",
+        *([f"  - {h}" for h in request.hypotheses] or ["  none"]),
+        "\nPROPOSED ACTIONS",
+    ]
+    for i, a in enumerate(request.actions, 1):
+        lines += [
+            f"  [{i}] Proposed Action:     {a.proposed_action}",
+            f"      Reason:              {a.reason}",
+            "      Supporting Evidence:",
+            *[f"        - {e.statement}   <{e.source}>" for e in a.supporting_evidence],
+            f"      Risk:                {a.risk}",
+            f"      Affected Component:  {a.affected_component}",
+            f"      Confidence:          {a.confidence:.2f}",
+            "      Missing Information:",
+            *([f"        - {m}" for m in a.missing_information] or ["        none"]),
+        ]
+    if not request.actions:
+        lines.append("  none")
+    lines += [
+        "\nMISSING INFORMATION",
+        *([f"  - {m}" for m in request.missing_information] or ["  none"]),
+        "\nRECOMMENDED CHECKS",
+        *([f"  - {c}" for c in request.recommended_checks] or ["  none"]),
+        "",
+        f"NOTE: {request.note}",
+    ]
+    return "\n".join(lines)

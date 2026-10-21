@@ -26,6 +26,8 @@ class DiagnosticRun(BaseModel):
     unavailable_agents: list[NonEmptyStr] = Field(default_factory=list)
     rca: RCAResult
     tools_invoked: list[ToolInvocationRecord] = Field(default_factory=list)
+    # Set when this run re-diagnoses an incident after a rejection or revision request.
+    supersedes: NonEmptyStr | None = None
     human_approval_required: Literal[True] = True
 
     @property

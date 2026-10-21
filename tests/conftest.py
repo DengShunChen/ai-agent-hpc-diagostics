@@ -65,3 +65,10 @@ def scopes():
     from hpc_agent.config import load_agent_tool_scopes
 
     return load_agent_tool_scopes(PROJECT_ROOT)
+
+
+@pytest.fixture
+def service(tmp_path, adapter, gateway, scopes):
+    from hpc_agent.workflows.approval_workflow import ApprovalService
+
+    return ApprovalService(tmp_path / "state", adapter, gateway, scopes)

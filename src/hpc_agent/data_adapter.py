@@ -35,6 +35,10 @@ class ReadOnlyDataAdapter:
         self._root = (root or default_data_root()).resolve()
         self._allowed = tuple((self._root / d).resolve() for d in ALLOWED_DIRS)
 
+    @property
+    def root(self) -> Path:
+        return self._root
+
     def _resolve(self, *segments: str) -> Path:
         for segment in segments:
             if not isinstance(segment, str) or not _SAFE_SEGMENT.match(segment) or ".." in segment:

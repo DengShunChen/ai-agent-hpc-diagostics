@@ -21,7 +21,7 @@ It is **not** an autonomous remediation platform.
 - Production HPC, storage, scheduler, network and GPU access is **disabled**.
 - No SSH automation, no sudo for agents, no shell tools, no automatic remediation.
 
-**Current status: Iteration 4 is complete.** All five specialist roles and the RCA Coordinator
+**Current status: Iteration 5 is complete.** All five specialist roles and the RCA Coordinator
 run end to end through a Microsoft Agent Framework workflow on synthetic data. The workflow
 produces a ranked, evidence-linked RCA with a timeline, and it never confirms a root cause on
 its own.
@@ -29,7 +29,9 @@ its own.
 - Agents cite SOPs, manuals and past incidents from the knowledge base as references only.
 - Every run is checked against runtime safety invariants before it is returned.
 - The agents are deterministic, and no LLM is called yet.
-- Approvals, audit persistence, the API and the container come in later iterations.
+- Every saved run waits for a human decision: approve, reject or request revision. Decisions
+  are recorded in a tamper-evident audit trail and are never executed.
+- The API, an optional UI and the container come in later iterations.
 
 ## Architecture
 
@@ -136,6 +138,37 @@ information, checks and proposed actions in separate sections:
 Running `./scripts/run_dev.sh` with no arguments validates every fixture and lists the
 allowlisted tools. See [docs/scenarios.md](docs/scenarios.md).
 
+## Human approval
+
+A saved diagnosis waits in `AWAITING_HUMAN_APPROVAL`. Review the package, which shows each
+proposed action with its reason, supporting evidence, risk, affected component, confidence
+and missing information:
+
+```bash
+./scripts/run_dev.sh review run-0123456789ab
+```
+
+Then record a decision:
+
+- `approve` (the comment is optional);
+- `reject` or `request-revision` (both need `--comment`);
+- `revise`, which re-diagnoses the incident as a new run that supersedes the old one;
+- `close`, after approval.
+
+```bash
+./scripts/run_dev.sh approve run-0123456789ab --operator ops.wang --comment "checks agreed"
+```
+
+Recording a decision **executes nothing**. Agent, bot and system identities are refused as
+operators. `history <run>` lists a run's transitions, and `verify-audit` checks both hash
+chains.
+
+Records are written to `audit-data/`, or to `HPC_AGENT_STATE_DIR` if it's set:
+
+- `runs/<run_id>.json`: write-once snapshots of each run;
+- `approvals.jsonl` and `audit.jsonl`: append-only and hash-chained. Files are created with
+  mode 0600.
+
 ## Future Podman deployment (Iteration 6)
 
 The plan is one rootless, non-root container. `knowledge/` and `test_data/` will be mounted
@@ -161,7 +194,10 @@ networking.
 - No API or UI yet.
 - Operator identity is a naming-rule guard only; real authentication is future work.
 - The credential scanner is pattern-based and can miss novel secret formats.
-- Audit records are modelled but not yet persisted (Iteration 5).
+- The `--operator` identity is asserted, not authenticated. Authentication belongs with
+  the API (Iteration 6+).
+- The hash chain detects edited, reordered or deleted records, but not records removed from
+  the end of the file. Anchor the latest hash externally if that matters.
 - No MTTR claims are made. MTTR reduction may only be reported after measurement against
   representative incidents.
 
@@ -171,7 +207,7 @@ networking.
 2. ✅ Triage, Storage, Scheduler agents; Agent Framework workflow; end-to-end scenario runs
 3. ✅ Network and GPU agents, RCA Coordinator, cross-domain correlation
 4. ✅ Knowledge tools, temporal evidence correlation, runtime safety guards, call budget
-5. Human-in-the-loop workflow, append-only audit logging
+5. ✅ Human-in-the-loop approval workflow, review package, hash-chained append-only audit logging
 6. API, optional simple UI, Containerfile, Podman deployment
 7. Evaluation, covering domain classification, root-cause accuracy, evidence quality,
    unsupported-claim rate, human override rate and processing time
