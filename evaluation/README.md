@@ -11,6 +11,11 @@ inline `incident` plus saved `test_data` (keys `domain/dataset`). `expected` hol
 - `forbidden_categories`: categories that must not appear as open hypotheses
 - `required_missing`: substrings that must appear in the missing-information list
 
+**Post-hoc change (2026-10-21):** after the first run, the RCA classification rule was changed
+because of EVAL-STOR-001 and EVAL-STOR-003. Classification accuracy before the change was
+85% (11/13). Later results on these cases don't independently test that rule. The disclosure
+is repeated in every generated report (`evaluation/report.py`, `POST_HOC_CHANGES`).
+
 **Limitation:** these labels were written by the developer of the agents. They check that the
 system behaves as designed; they are not an independent accuracy benchmark. Representative,
 de-identified incidents labelled by operations engineers are needed for that.

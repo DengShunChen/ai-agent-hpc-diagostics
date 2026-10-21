@@ -80,9 +80,18 @@ class RCACoordinator:
 
         affected = dedupe([c.domain for c in open_causes if c.domain is not None])
         tool_backed = {
-            c.domain for c in open_causes if any(e.kind is EvidenceKind.TOOL_RESULT for e in c.supporting_evidence)
+            c.domain for c in open_causes
+            if c.domain is not None and any(e.kind is EvidenceKind.TOOL_RESULT for e in c.supporting_evidence)
         }
-        classification = Domain.MULTI_DOMAIN if len(tool_backed) >= 2 else triage.classification
+        # Tool evidence outranks keyword triage; triage decides only when no hypothesis is tool-backed.
+        # (Single-domain rule added 2026-10-21 after evaluation cases EVAL-STOR-001/003 were
+        # classified multi-domain from a keyword tie; see docs/evaluation.md.)
+        if len(tool_backed) >= 2:
+            classification = Domain.MULTI_DOMAIN
+        elif len(tool_backed) == 1:
+            classification = next(iter(tool_backed))
+        else:
+            classification = triage.classification
 
         missing = dedupe(
             [*triage.missing_evidence, *(m for d in diagnoses for m in d.missing_information)]

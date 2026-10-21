@@ -127,3 +127,38 @@ def test_missing_incident_time_prevents_temporal_claims():
     rca = correlate_at(None, timed("late", 90))
     assert rca.probable_causes[0].confidence == 0.4
     assert any("incident timestamp missing" in r for r in rca.cross_domain_relationships)
+
+
+# --- classification is decided by tool evidence first --------------------------------
+TIE = Incident(incident_id="INC-TIE-001", severity="high", symptoms=["job failed while writing output"])
+OST_EV = ev("tool:get_ost_usage:z", "OSTs at or above 95% used: OST0002=97.5%")
+TIE_REPORT = ev("INC-TIE-001:symptoms[0]", "job failed while writing output", EvidenceKind.INCIDENT_REPORT)
+
+
+def correlate_tie(*diagnoses):
+    triage = TriageAgent().triage(TIE)
+    assert triage.classification == "multi-domain"  # keyword tie: storage vs scheduler
+    return RCACoordinator().correlate(TIE, triage, list(diagnoses))
+
+
+def test_single_tool_backed_domain_overrides_keyword_tie():
+    storage = diag("storage-agent", "storage", [TIE_REPORT, OST_EV],
+                   [cause("full OST", "storage", [TIE_REPORT, OST_EV], 0.6)])
+    scheduler = diag("scheduler-agent", "scheduler", [TIE_REPORT])  # no data, no hypothesis
+    assert correlate_tie(storage, scheduler).classification == "storage"
+
+
+def test_symptom_only_hypotheses_keep_triage_classification():
+    storage = diag("storage-agent", "storage", [TIE_REPORT], [cause("capacity?", "storage", [TIE_REPORT], 0.25)])
+    assert correlate_tie(storage).classification == "multi-domain"
+
+
+def test_ruled_out_or_unsupported_domains_do_not_count():
+    ruled = cause("walltime", "scheduler", [], 0.0, status="ruled_out", conflicting_evidence=[NODE_EV])
+    storage = diag("storage-agent", "storage", [TIE_REPORT, OST_EV], [cause("full OST", "storage", [OST_EV], 0.6)])
+    scheduler = diag("scheduler-agent", "scheduler", [NODE_EV], [ruled])
+    assert correlate_tie(storage, scheduler).classification == "storage"
+
+
+def test_two_tool_backed_domains_are_multi_domain_even_without_tie():
+    assert correlate([GPU_DIAG, SCHED_DIAG]).classification == "multi-domain"

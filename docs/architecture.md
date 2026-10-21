@@ -105,8 +105,12 @@ flowchart LR
   reported as ties in the summary.
 - **Ruled out**: causes that specialists ruled out are kept, with the conflicting evidence
   they cite.
-- **Classification**: `multi-domain` when tool-backed hypotheses span two or more domains;
-  otherwise the triage classification.
+- **Classification**, decided by tool evidence first:
+  - `multi-domain` when tool-backed hypotheses span two or more domains;
+  - that domain when they span exactly one;
+  - the keyword-based triage classification only when no hypothesis is tool-backed.
+
+  The single-domain rule was added after the evaluation (see [evaluation.md](evaluation.md)).
 - **Relationships**: an incident item cited by two or more domains, or a component (for
   example `node:…`) implicated by two or more domains.
 - **Cross-domain checks**: when a node is implicated, checks are recommended for any storage,

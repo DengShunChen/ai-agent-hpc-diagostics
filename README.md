@@ -317,10 +317,11 @@ Container properties:
   binary. Nothing exposes it, but a slimmer base would remove it.
 - With `--userns=keep-id`, the first start on a new image copies and re-owns its layers.
   That took about 10 minutes on this busy host; later starts take about 1 second.
-- Triage classification is keyword-based. In the evaluation, two single-symptom storage cases
-  ("job failed while writing…") tied with the scheduler and came out `multi-domain`. The
-  diagnosis itself was correct. The coordinator keeps the triage label unless tool evidence
-  spans two or more domains (see [docs/evaluation.md](docs/evaluation.md)).
+- Triage classification is keyword-based, so ties are possible. The RCA classification now
+  follows tool evidence when there is any. This rule was added **after** the evaluation
+  showed two storage cases misclassified as `multi-domain` (85% before the change). Results on
+  those cases therefore don't independently test it; see the disclosure in
+  [docs/evaluation.md](docs/evaluation.md).
 - The evaluation labels are synthetic and were written by the developer of the agents.
 - The hash chain detects edited, reordered or deleted records, but not records removed from
   the end of the file. Anchor the latest hash externally if that matters.

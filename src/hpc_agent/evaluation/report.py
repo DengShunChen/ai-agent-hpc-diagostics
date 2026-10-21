@@ -8,6 +8,18 @@ from hpc_agent.evaluation.harness import CaseResult, Summary
 
 POC_CASES = ("POC-STORAGE-001", "POC-SCHEDULER-001", "POC-GPU-001")
 
+# Changes made to the system after seeing results on this case set. They stay in every
+# generated report: results on these cases cannot count as an independent test of them.
+POST_HOC_CHANGES = [
+    "**2026-10-21: RCA classification rule.** The first evaluation run classified EVAL-STOR-001 and "
+    "EVAL-STOR-003 as `multi-domain`. Each is a single-symptom write failure (\"job failed while "
+    "writing…\") where keyword triage tied storage with the scheduler, although only storage had "
+    "tool evidence. Domain classification was then **85% (11/13)**. The rule was changed so that "
+    "when tool-backed hypotheses span exactly one domain, the RCA uses that domain. Classification "
+    "results on these 13 cases after that change are **not** an independent test of the rule; new, "
+    "independently labelled cases are needed for that.",
+]
+
 
 def _pct(value: float | None) -> str:
     return "n/a" if value is None else f"{value:.0%}"
@@ -31,6 +43,10 @@ def render_markdown(results: list[CaseResult], summary: Summary) -> str:
         "> of the agents. The numbers show that the system behaves as designed on designed examples;",
         "> they are **not** evidence of accuracy on real incidents. The agents are deterministic, so",
         "> processing times say nothing about LLM latency. **No MTTR reduction is claimed.**",
+        "",
+        "## Disclosure: changes made after seeing these results",
+        "",
+        *[f"- {change}" for change in POST_HOC_CHANGES],
         "",
         "## Summary",
         "",

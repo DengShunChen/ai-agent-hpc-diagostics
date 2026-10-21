@@ -1,17 +1,21 @@
 # POC Evaluation Report
 
-Generated 2026-10-21 09:02 UTC by `hpc-agent evaluate` over 13 synthetic cases.
+Generated 2026-10-21 11:14 UTC by `hpc-agent evaluate` over 13 synthetic cases.
 
 > **Read this first.** All cases are synthetic, and their labels were written by the developer
 > of the agents. The numbers show that the system behaves as designed on designed examples;
 > they are **not** evidence of accuracy on real incidents. The agents are deterministic, so
 > processing times say nothing about LLM latency. **No MTTR reduction is claimed.**
 
+## Disclosure: changes made after seeing these results
+
+- **2026-10-21: RCA classification rule.** The first evaluation run classified EVAL-STOR-001 and EVAL-STOR-003 as `multi-domain`. Each is a single-symptom write failure ("job failed while writing…") where keyword triage tied storage with the scheduler, although only storage had tool evidence. Domain classification was then **85% (11/13)**. The rule was changed so that when tool-backed hypotheses span exactly one domain, the RCA uses that domain. Classification results on these 13 cases after that change are **not** an independent test of the rule; new, independently labelled cases are needed for that.
+
 ## Summary
 
 | Metric | Result |
 |---|---|
-| Correct domain classification | 85% |
+| Correct domain classification | 100% |
 | Root cause accuracy, leading hypothesis (top-1) | 100% |
 | Root cause accuracy, top-3 | 100% |
 | Outcome matches label (supported / insufficient / none) | 100% |
@@ -20,7 +24,7 @@ Generated 2026-10-21 09:02 UTC by `hpc-agent evaluate` over 13 synthetic cases.
 | Evidence quality: required missing information identified | 100% |
 | Unsupported claim rate (per open hypothesis) | 0% (0 claims) |
 | Human override rate | not measured: no recorded human decisions were supplied |
-| Diagnostic processing time (mean / median / max) | 7 / 7 / 8 ms |
+| Diagnostic processing time (mean / median / max) | 7 / 7 / 9 ms |
 
 ## Per-case results
 
@@ -30,14 +34,14 @@ Generated 2026-10-21 09:02 UTC by `hpc-agent evaluate` over 13 synthetic cases.
 | EVAL-GPU-002 | gpu | supported_hypothesis | gpu.thermal | 0.40 | yes | 1/1 | 0 | 0/0 | 6 |
 | EVAL-NET-001 | multi-domain | supported_hypothesis | network.link_down | 0.50 | yes | 2/2 | 0 | 1/1 | 7 |
 | EVAL-SCHED-001 | scheduler | supported_hypothesis | scheduler.walltime | 0.50 | yes | 2/2 | 0 | 0/0 | 6 |
-| EVAL-SCHED-002 | scheduler | supported_hypothesis | application.crash | 0.30 | yes | 1/1 | 0 | 0/0 | 6 |
-| EVAL-STOR-001 | **multi-domain** | supported_hypothesis | storage.capacity | 0.60 | yes | 2/2 | 0 | 1/1 | 7 |
-| EVAL-STOR-002 | storage | no_supported_hypothesis | – | 0.00 | – | 0/0 | 0 | 0/0 | 8 |
-| EVAL-STOR-003 | **multi-domain** | supported_hypothesis | storage.ost_imbalance | 0.40 | yes | 1/1 | 0 | 0/0 | 7 |
-| EVAL-TIME-001 | scheduler | supported_hypothesis | scheduler.signal_termination | 0.30 | yes | 2/2 | 0 | 0/0 | 6 |
-| EVAL-UNK-001 | unknown | no_supported_hypothesis | – | 0.00 | – | 0/0 | 0 | 1/1 | 1 |
+| EVAL-SCHED-002 | scheduler | supported_hypothesis | application.crash | 0.30 | yes | 1/1 | 0 | 0/0 | 7 |
+| EVAL-STOR-001 | storage | supported_hypothesis | storage.capacity | 0.60 | yes | 2/2 | 0 | 1/1 | 7 |
+| EVAL-STOR-002 | storage | no_supported_hypothesis | – | 0.00 | – | 0/0 | 0 | 0/0 | 9 |
+| EVAL-STOR-003 | storage | supported_hypothesis | storage.ost_imbalance | 0.40 | yes | 1/1 | 0 | 0/0 | 7 |
+| EVAL-TIME-001 | scheduler | supported_hypothesis | scheduler.signal_termination | 0.30 | yes | 2/2 | 0 | 0/0 | 7 |
+| EVAL-UNK-001 | unknown | no_supported_hypothesis | – | 0.00 | – | 0/0 | 0 | 1/1 | 2 |
 | POC-GPU-001 | gpu | supported_hypothesis | gpu.application | 0.35 | yes | 1/1 | 0 | 1/1 | 7 |
-| POC-SCHEDULER-001 | scheduler | supported_hypothesis | scheduler.signal_termination | 0.30 | yes | 2/2 | 0 | 2/2 | 8 |
+| POC-SCHEDULER-001 | scheduler | supported_hypothesis | scheduler.signal_termination | 0.30 | yes | 2/2 | 0 | 2/2 | 7 |
 | POC-STORAGE-001 | storage | insufficient_evidence | storage.capacity | 0.25 | yes | 0/1 | 0 | 4/4 | 7 |
 
 ## Scenario comparison (POC scenarios)
@@ -60,8 +64,7 @@ None detected.
 
 ## Mismatches against labels
 
-- EVAL-STOR-001: classification=multi-domain, outcome=supported_hypothesis (expected supported_hypothesis), leading=storage.capacity
-- EVAL-STOR-003: classification=multi-domain, outcome=supported_hypothesis (expected supported_hypothesis), leading=storage.ost_imbalance
+None.
 
 ## Method
 

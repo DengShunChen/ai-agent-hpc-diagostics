@@ -81,6 +81,8 @@ def test_override_rate_only_from_recorded_decisions(tmp_path):
 def test_report_states_limits(evaluation):
     report = render_markdown(*evaluation)
     assert "No MTTR reduction is claimed" in report
+    assert "## Disclosure: changes made after seeing these results" in report
+    assert "85% (11/13)" in report and "not** an independent test" in report
     assert "not evidence of accuracy on real incidents" in report.replace("**", "")
     assert "not measured: no recorded human decisions" in report
 
