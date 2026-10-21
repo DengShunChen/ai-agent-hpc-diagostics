@@ -48,16 +48,17 @@ criterion.**
   versions, whether the error reproduces on other GPUs or nodes, and the application
   code path.
 
-## Status (Iteration 2)
+## Status (Iteration 3)
 
 You can run each scenario with `./scripts/run_dev.sh diagnose <ID>`. The tests are in
 `tests/scenarios/test_scenario_workflows.py`.
 
-| Scenario | Classification | Agents run | Result |
+| Scenario | RCA classification | Agents run | Result |
 |---|---|---|---|
-| POC-STORAGE-001 | storage (related: scheduler) | storage, scheduler | One hypothesis at confidence 0.25, no actions, and the four required missing items and three required checks. The run states that reported high utilization is not a measurement. |
-| POC-SCHEDULER-001 | scheduler | scheduler | SIGKILL and the drained allocated node are kept as unconfirmed possibilities (confidence 0.30). The saved data rules out a walltime limit. The drain reason, OOM events and cross-domain state are listed as missing. |
-| POC-GPU-001 | gpu (related: scheduler) | scheduler | `gpu-agent` is reported as not available and its domain as not examined. No hardware conclusion is made. |
+| POC-STORAGE-001 | storage | storage, scheduler | One hypothesis (capacity or OST imbalance) at confidence 0.25, with no actions. It reports the four required missing items and the three required checks. The cross-domain relationship is that the "job failed while writing output" symptom concerns both storage and the scheduler. |
+| POC-SCHEDULER-001 | scheduler | scheduler | SIGKILL and the drained allocated node are tied at confidence 0.30. The walltime limit is **ruled out**, citing the conflicting evidence. Because the node is implicated and the storage, network and GPU domains weren't examined, checks for those domains are recommended. |
+| POC-GPU-001 | gpu | gpu, scheduler | The leading hypothesis is an application or CUDA software fault (XID 13 is commonly associated with application errors), at confidence 0.35. **No hardware conclusion is made.** The five missing hardware telemetry fields are listed, and an operator-run DCGM diagnostic is recommended but not executed. |
 
-None of the runs claims a root cause. The RCA Coordinator (Iteration 3) will correlate these
-findings.
+Every RCA reports "Root cause NOT confirmed; human review required". A test with synthetic
+data (`test_multi_domain_correlation_on_shared_node`) also checks that a node implicated by
+both scheduler and network data is classified as `multi-domain` and correlated.

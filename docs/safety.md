@@ -58,6 +58,15 @@ whose operation the policy denies are all rejected.
   typed fields (for example a percentage given as a string) are listed as missing
   information and never estimated.
 - A `RecommendedAction` is only produced when tool-derived evidence supports it.
+- Specialist diagnoses can't contain a `confirmed` cause, and every piece of evidence a cause
+  cites must be part of that diagnosis's evidence. A `ruled_out` cause must cite its
+  conflicting evidence.
+- The RCA Coordinator ranks hypotheses but never confirms one. In this POC, confirming a root
+  cause is a human decision.
+- The GPU Agent never runs DCGM or any GPU command. It recommends an *operator-run* diagnostic
+  and says explicitly that the platform does not run it. It forms a hardware hypothesis only
+  from hardware-class XIDs or non-zero hardware counters.
+- The Network Agent never contacts switches, routers or SNMP agents.
 - `DiagnosticRun.root_cause_determined` is typed as `Literal[False]` until the RCA
   Coordinator exists.
 - The static test also bans the framework's `SkillScriptRunner` and unsafe YAML loaders.

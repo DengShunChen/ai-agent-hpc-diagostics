@@ -3,7 +3,7 @@ import math
 import pytest
 from pydantic import ValidationError
 
-from hpc_agent.models import AgentDiagnosis, Domain, RecommendedAction
+from hpc_agent.models import AgentDiagnosis, Domain, ProbableCause, RecommendedAction
 
 
 def test_valid_diagnosis(reported):
@@ -12,7 +12,8 @@ def test_valid_diagnosis(reported):
         domain="storage",
         finding="write failure reported while filesystem utilization reported high",
         evidence=[reported],
-        possible_causes=["OST capacity or imbalance may be contributing"],
+        possible_causes=[ProbableCause(cause="OST capacity or imbalance may contribute", domain="storage",
+                                       supporting_evidence=[reported], confidence=0.3)],
         recommended_checks=["get_ost_usage"],
         missing_information=["individual OST utilization"],
         confidence=0.3,
@@ -70,3 +71,32 @@ def test_recommended_action_requires_reason_and_component():
         RecommendedAction(action="drain node", reason="", risk="high", affected_component="sim-node")
     with pytest.raises(ValidationError):
         RecommendedAction(action="drain node", reason="x", risk="extreme", affected_component="n")
+
+
+def test_specialist_cannot_confirm_root_cause(tool_evidence):
+    cause = ProbableCause(cause="OST full", status="confirmed", supporting_evidence=[tool_evidence])
+    with pytest.raises(ValidationError, match="may not confirm"):
+        AgentDiagnosis(agent="storage-agent", domain="storage", evidence=[tool_evidence], possible_causes=[cause])
+
+
+def test_cause_evidence_must_belong_to_diagnosis(reported, tool_evidence):
+    cause = ProbableCause(cause="OST full", supporting_evidence=[tool_evidence], confidence=0.5)
+    with pytest.raises(ValidationError, match="part of the diagnosis evidence"):
+        AgentDiagnosis(agent="storage-agent", domain="storage", evidence=[reported], possible_causes=[cause])
+
+
+def test_ruled_out_cause_must_cite_conflict(reported):
+    with pytest.raises(ValidationError, match="conflicting"):
+        ProbableCause(cause="capacity", status="ruled_out", supporting_evidence=[reported])
+
+
+def test_hypotheses_excludes_ruled_out(reported, tool_evidence):
+    d = AgentDiagnosis(
+        agent="storage-agent", domain="storage", evidence=[reported, tool_evidence],
+        possible_causes=[
+            ProbableCause(cause="a", supporting_evidence=[reported], confidence=0.2),
+            ProbableCause(cause="b", status="ruled_out", supporting_evidence=[reported],
+                          conflicting_evidence=[tool_evidence]),
+        ],
+    )
+    assert [c.cause for c in d.hypotheses] == ["a"]

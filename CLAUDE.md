@@ -34,7 +34,8 @@ Never push to any Git remote unless explicitly instructed.
 - `src/hpc_agent/models/` — Pydantic models (Incident, AgentDiagnosis, RCAResult, AuditRecord, ApprovalRecord)
 - `src/hpc_agent/safety/` — operation policy (default deny), approval transitions, credential scanner
 - `src/hpc_agent/tools/gateway.py` — allowlisted Tool Gateway (fail closed) and per-agent `ScopedGateway`
-- `src/hpc_agent/agents/` — framework-free, deterministic agents; they see data only via `ScopedGateway`
+- `src/hpc_agent/agents/` — framework-free, deterministic agents; they see data only via `ScopedGateway`.
+  Specialists may propose or rule out causes; nothing in agents/ or workflows/ may confirm one
 - `src/hpc_agent/workflows/` — Microsoft Agent Framework orchestration only (no LLM, no AF tool execution)
 - `config/agents.yaml` — per-agent tool scopes (can narrow, never widen, the allowlist)
 - `src/hpc_agent/data_adapter.py` — the only reader of `fixtures/`, `test_data/`, `knowledge/`

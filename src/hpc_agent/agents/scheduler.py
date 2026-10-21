@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 
 from hpc_agent.agents.evidence import dedupe, incident_evidence, tool_evidence
-from hpc_agent.models import AgentDiagnosis, Domain, Evidence, Incident
+from hpc_agent.models import AgentDiagnosis, Domain, Evidence, HypothesisStatus, Incident, ProbableCause
 from hpc_agent.tools.gateway import ScopedGateway, ToolStatus
 
 UNHEALTHY_NODE_STATES = frozenset({"DRAIN", "DRAINED", "DRAINING", "DOWN", "FAIL", "FAILING", "NOT_RESPONDING"})
@@ -39,12 +39,19 @@ class SchedulerAgent:
     name = "scheduler-agent"
 
     def diagnose(self, incident: Incident, gateway: ScopedGateway) -> AgentDiagnosis:
-        evidence: list[Evidence] = incident_evidence(incident, Domain.SCHEDULER)
+        reported = incident_evidence(incident, Domain.SCHEDULER)
+        evidence: list[Evidence] = list(reported)
         missing: list[str] = []
         checks: list[str] = []
-        causes: list[str] = []
-        confidences: list[float] = []
+        causes: list[ProbableCause] = []
+        components: list[str] = []
         summary: list[str] = []
+
+        def hypothesis(text: str, confidence: float, support: list[Evidence]) -> None:
+            causes.append(
+                ProbableCause(cause=text, domain=Domain.SCHEDULER, supporting_evidence=support, confidence=confidence)
+            )
+
         abnormal = False
         allocated: set[str] = set()
 
@@ -55,28 +62,34 @@ class SchedulerAgent:
             checks.append("get_job_status()")
         else:
             job_id = data.get("job_id") if isinstance(data.get("job_id"), str) else "job"
+            if job_id != "job":
+                components.append(f"job:{job_id}")
             state = data.get("state")
+            state_ev: list[Evidence] = []
             if isinstance(state, str):
-                evidence.append(tool_evidence(job, f"{job_id} state={state}"))
+                state_ev = [tool_evidence(job, f"{job_id} state={state}")]
+                evidence += state_ev
                 summary.append(f"{job_id} {state}")
             else:
                 missing.append("job state")
 
             exit_code = data.get("exit_code")
             if isinstance(exit_code, int) and not isinstance(exit_code, bool):
-                evidence.append(tool_evidence(job, f"{job_id} exit_code={exit_code}"))
+                exit_ev = tool_evidence(job, f"{job_id} exit_code={exit_code}")
+                evidence.append(exit_ev)
                 summary.append(f"exit code {exit_code}")
                 if exit_code > 128:
                     signal = exit_code - 128
-                    causes.append(_SIGNAL_CAUSES.get(signal, f"Job terminated by signal {signal}"))
-                    confidences.append(0.3)
+                    hypothesis(_SIGNAL_CAUSES.get(signal, f"Job terminated by signal {signal}"), 0.3,
+                               state_ev + [exit_ev])
                     abnormal = True
                 elif exit_code > 0:
-                    causes.append(
+                    hypothesis(
                         f"Application exited with code {exit_code}; the application's own error output "
-                        "should be checked before suspecting the scheduler"
+                        "should be checked before suspecting the scheduler",
+                        0.3,
+                        state_ev + [exit_ev],
                     )
-                    confidences.append(0.3)
                     checks.append("review job stdout/stderr for application errors")
             else:
                 missing.append("job exit code")
@@ -86,13 +99,21 @@ class SchedulerAgent:
             if req_s is None or el_s is None:
                 missing.append("job elapsed time and walltime limit")
             elif el_s >= req_s:
-                evidence.append(tool_evidence(job, f"elapsed {elapsed} reached requested walltime {requested}"))
-                causes.append("Job reached its walltime limit")
-                confidences.append(0.5)
+                item = tool_evidence(job, f"elapsed {elapsed} reached requested walltime {requested}")
+                evidence.append(item)
+                hypothesis("Job reached its walltime limit", 0.5, state_ev + [item])
             else:
-                evidence.append(
-                    tool_evidence(job, f"elapsed {elapsed} is below requested walltime {requested}; "
-                                       "walltime limit was not reached")
+                item = tool_evidence(job, f"elapsed {elapsed} is below requested walltime {requested}; "
+                                          "walltime limit was not reached")
+                evidence.append(item)
+                causes.append(
+                    ProbableCause(
+                        cause="Job reached its walltime limit",
+                        domain=Domain.SCHEDULER,
+                        status=HypothesisStatus.RULED_OUT,
+                        supporting_evidence=state_ev,
+                        conflicting_evidence=[item],
+                    )
                 )
 
             reason = data.get("termination_reason")
@@ -118,39 +139,44 @@ class SchedulerAgent:
                 if not isinstance(state, str) or not relevant:
                     continue
                 has_reason = isinstance(reason, str) and bool(reason)
-                evidence.append(
-                    tool_evidence(node, f"node {name} state={state}" + (f" reason={reason}" if has_reason else ""))
-                )
+                node_ev = tool_evidence(node, f"node {name} state={state}" + (f" reason={reason}" if has_reason else ""))
+                evidence.append(node_ev)
                 if state.upper() in UNHEALTHY_NODE_STATES:
                     abnormal = True
+                    components.append(f"node:{name}")
                     summary.append(f"node {name} {state}")
                     if not has_reason:
                         missing.append(f"reason node {name} entered {state}")
-                    causes.append(
+                    hypothesis(
                         f"Node {name} entered {state}; a node problem may have terminated the job. The node "
                         "state alone does not show whether the cause is hardware, GPU, network, storage or an "
-                        "administrator action"
+                        "administrator action",
+                        0.3,
+                        [node_ev],
                     )
-                    confidences.append(0.3)
                     checks.append(f"review node health checks and system logs for {name} around the failure time")
 
         if abnormal:
             missing.append("node memory / out-of-memory events at the failure time")
             missing.append("storage, network and GPU state on the job's nodes at the failure time")
 
+        open_causes = [c for c in causes if c.status is HypothesisStatus.HYPOTHESIS]
         return AgentDiagnosis(
             agent=self.name,
             domain=Domain.SCHEDULER,
-            finding=self._finding(evidence, data is not None, summary, causes),
+            finding=self._finding(evidence, data is not None, summary, open_causes),
             evidence=evidence,
             possible_causes=causes,
+            affected_components=dedupe(components),
             recommended_checks=dedupe(checks),
             missing_information=dedupe(missing),
-            confidence=max(confidences, default=0.0),
+            confidence=max((c.confidence for c in open_causes), default=0.0),
         )
 
     @staticmethod
-    def _finding(evidence: list[Evidence], has_job_data: bool, summary: list[str], causes: list[str]) -> str:
+    def _finding(
+        evidence: list[Evidence], has_job_data: bool, summary: list[str], causes: list[ProbableCause]
+    ) -> str:
         if not evidence:
             return ""
         if not has_job_data:

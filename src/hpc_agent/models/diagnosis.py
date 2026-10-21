@@ -60,6 +60,37 @@ class RecommendedAction(BaseModel):
     supporting_evidence: list[Evidence] = Field(default_factory=list)
 
 
+class HypothesisStatus(StrEnum):
+    HYPOTHESIS = "hypothesis"
+    CONFIRMED = "confirmed"
+    RULED_OUT = "ruled_out"
+
+
+class ProbableCause(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    cause: NonEmptyStr
+    domain: Domain | None = None
+    status: HypothesisStatus = HypothesisStatus.HYPOTHESIS
+    supporting_evidence: list[Evidence] = Field(default_factory=list)
+    conflicting_evidence: list[Evidence] = Field(default_factory=list)
+    confidence: Confidence = 0.0
+
+    @model_validator(mode="after")
+    def _confirmation_needs_tool_evidence(self) -> ProbableCause:
+        if self.confidence > 0.0 and not self.supporting_evidence:
+            raise ValueError("non-zero confidence requires supporting evidence")
+        if self.status is HypothesisStatus.RULED_OUT and not self.conflicting_evidence:
+            raise ValueError("a ruled-out cause must cite the conflicting evidence")
+        if self.status is HypothesisStatus.CONFIRMED:
+            # Reported symptoms alone can never confirm a root cause.
+            if not any(e.kind is EvidenceKind.TOOL_RESULT for e in self.supporting_evidence):
+                raise ValueError("a confirmed cause requires tool-derived supporting evidence")
+            if self.conflicting_evidence:
+                raise ValueError("a cause with conflicting evidence cannot be confirmed")
+        return self
+
+
 class AgentDiagnosis(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -67,7 +98,9 @@ class AgentDiagnosis(BaseModel):
     domain: Domain
     finding: str = ""
     evidence: list[Evidence] = Field(default_factory=list)
-    possible_causes: list[NonEmptyStr] = Field(default_factory=list)
+    possible_causes: list[ProbableCause] = Field(default_factory=list)
+    # Components implicated by evidence, e.g. "node:sim-node-0042", "ost:OST0002".
+    affected_components: list[NonEmptyStr] = Field(default_factory=list)
     recommended_checks: list[NonEmptyStr] = Field(default_factory=list)
     recommended_actions: list[RecommendedAction] = Field(default_factory=list)
     missing_information: list[NonEmptyStr] = Field(default_factory=list)
@@ -80,35 +113,17 @@ class AgentDiagnosis(BaseModel):
             raise ValueError("a finding requires at least one supporting evidence item")
         if self.confidence > 0.0 and not self.evidence:
             raise ValueError("non-zero confidence requires supporting evidence")
+        for cause in self.possible_causes:
+            if cause.status is HypothesisStatus.CONFIRMED:
+                raise ValueError("specialist agents may not confirm a root cause")
+            cited = cause.supporting_evidence + cause.conflicting_evidence
+            if any(e not in self.evidence for e in cited):
+                raise ValueError("cause evidence must be part of the diagnosis evidence")
         return self
 
-
-class HypothesisStatus(StrEnum):
-    HYPOTHESIS = "hypothesis"
-    CONFIRMED = "confirmed"
-    RULED_OUT = "ruled_out"
-
-
-class ProbableCause(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    cause: NonEmptyStr
-    status: HypothesisStatus = HypothesisStatus.HYPOTHESIS
-    supporting_evidence: list[Evidence] = Field(default_factory=list)
-    conflicting_evidence: list[Evidence] = Field(default_factory=list)
-    confidence: Confidence = 0.0
-
-    @model_validator(mode="after")
-    def _confirmation_needs_tool_evidence(self) -> ProbableCause:
-        if self.confidence > 0.0 and not self.supporting_evidence:
-            raise ValueError("non-zero confidence requires supporting evidence")
-        if self.status is HypothesisStatus.CONFIRMED:
-            # Reported symptoms alone can never confirm a root cause.
-            if not any(e.kind is EvidenceKind.TOOL_RESULT for e in self.supporting_evidence):
-                raise ValueError("a confirmed cause requires tool-derived supporting evidence")
-            if self.conflicting_evidence:
-                raise ValueError("a cause with conflicting evidence cannot be confirmed")
-        return self
+    @property
+    def hypotheses(self) -> list[ProbableCause]:
+        return [c for c in self.possible_causes if c.status is HypothesisStatus.HYPOTHESIS]
 
 
 class RCAResult(BaseModel):
@@ -125,6 +140,7 @@ class RCAResult(BaseModel):
     missing_information: list[NonEmptyStr] = Field(default_factory=list)
     recommended_checks: list[NonEmptyStr] = Field(default_factory=list)
     recommended_actions: list[RecommendedAction] = Field(default_factory=list)
+    cross_domain_relationships: list[NonEmptyStr] = Field(default_factory=list)
     confidence: Confidence = 0.0
     human_approval_required: Literal[True] = True
 

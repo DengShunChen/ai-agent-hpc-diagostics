@@ -21,10 +21,11 @@ It is **not** an autonomous remediation platform.
 - Production HPC, storage, scheduler, network and GPU access is **disabled**.
 - No SSH automation, no sudo for agents, no shell tools, no automatic remediation.
 
-**Current status: Iteration 2 is complete.** The Triage, Storage and Scheduler agents run end
-to end through a Microsoft Agent Framework workflow on synthetic data. The agents are
-deterministic and evidence-grounded, and no LLM is called yet. The Network and GPU agents, the
-RCA Coordinator, approvals, the API and the container come in later iterations.
+**Current status: Iteration 3 is complete.** All five specialist roles and the RCA Coordinator
+run end to end through a Microsoft Agent Framework workflow on synthetic data. The workflow
+produces a ranked, evidence-linked RCA that never confirms a root cause on its own. The agents
+are deterministic and evidence-grounded, and no LLM is called yet. Knowledge tools, approvals,
+audit persistence, the API and the container come in later iterations.
 
 ## Architecture
 
@@ -58,9 +59,9 @@ See [docs/safety.md](docs/safety.md).
 | Triage | ✅ Iteration 2 | Extract symptoms, identify available/missing evidence, classify domain, select specialists |
 | Storage | ✅ Iteration 2 | FEFS/Lustre: capacity, OST utilization/imbalance, I/O errors, health |
 | Scheduler | ✅ Iteration 2 | PJM/Slurm: job/node state, exit signals, walltime, abnormal termination |
-| Network | Iteration 3 | NIC/bond/Ethernet status, interface errors, saved SNMP/monitoring data |
-| GPU | Iteration 3 | Saved DCGM-style health, XID/CUDA errors, memory, PCIe, NVLink, power, thermal |
-| RCA Coordinator | Iteration 3 | Correlate findings, rank hypotheses, separate fact / hypothesis / recommendation / missing info |
+| Network | ✅ Iteration 3 | NIC/bond/Ethernet status, interface errors, saved SNMP/monitoring data |
+| GPU | ✅ Iteration 3 | Saved DCGM-style health, XID/CUDA errors, memory, PCIe, NVLink, power, thermal |
+| RCA Coordinator | ✅ Iteration 3 | Correlate findings, rank hypotheses, record ruled-out causes and conflicting evidence, relate domains; never confirms |
 
 ## Workflow and approval states
 
@@ -142,8 +143,13 @@ networking.
 
 - Agents are deterministic rule-based analyzers. No LLM is integrated yet, and that needs a
   configured provider and credentials supplied by a human.
-- The Network and GPU agents and the RCA Coordinator are not implemented. Runs list such
-  domains as not examined and never claim a root cause.
+- The coordinator never confirms a root cause. Confirmation is left to the human reviewer
+  until a confirmation rule is agreed and validated against representative incidents.
+- Cross-domain correlation is rule-based. It links findings through shared incident items
+  and shared components (node, job, OST, GPU, interface), not through timing. Timestamps are
+  not yet correlated.
+- The XID table covers a subset of NVIDIA XID codes. Unknown codes are reported as missing
+  interpretation.
 - Triage uses keyword signals, so unusual wording can be misclassified as `unknown`. That
   outcome is safe, but not useful.
 - No API or UI yet.
@@ -157,7 +163,7 @@ networking.
 
 1. ✅ Environment, models, fixtures, safety foundation, tests
 2. ✅ Triage, Storage, Scheduler agents; Agent Framework workflow; end-to-end scenario runs
-3. Network and GPU agents, RCA Coordinator
+3. ✅ Network and GPU agents, RCA Coordinator, cross-domain correlation
 4. Full Tool Gateway, knowledge tools, evidence correlation
 5. Human-in-the-loop workflow, append-only audit logging
 6. API, optional simple UI, Containerfile, Podman deployment

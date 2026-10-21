@@ -87,3 +87,24 @@ def test_recommended_actions_have_tool_evidence(run):
         for action in d.recommended_actions:
             assert any(e.kind is EvidenceKind.TOOL_RESULT for e in action.supporting_evidence)
 
+
+
+def test_rca_never_confirms_and_actions_are_evidence_backed(run):
+    assert run.rca.confirmed_root_cause is None
+    assert run.rca.human_approval_required is True
+    for action in run.rca.recommended_actions:
+        assert any(e.kind is EvidenceKind.TOOL_RESULT for e in action.supporting_evidence)
+
+
+def test_rca_facts_come_only_from_agents_and_incident(run):
+    sources = {(e.source, e.statement) for d in run.diagnoses for e in d.evidence}
+    sources |= {(e.source, e.statement) for e in run.triage.available_evidence}
+    assert {(e.source, e.statement) for e in run.rca.facts} <= sources
+
+
+def test_no_code_path_confirms_a_root_cause():
+    # Confirmation is a human decision in this POC; agents and workflows must never set it.
+    for directory in ("agents", "workflows"):
+        for path in (PROJECT_ROOT / "src" / "hpc_agent" / directory).rglob("*.py"):
+            text = path.read_text(encoding="utf-8")
+            assert "HypothesisStatus.CONFIRMED" not in text and '"confirmed"' not in text, path.name

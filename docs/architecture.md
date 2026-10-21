@@ -75,17 +75,44 @@ Rocky Linux 10
 | TriageResult, DiagnosticRun | `models/triage.py`, `models/run.py` |
 | Agent Framework workflow + text report | `workflows/diagnostic_workflow.py` |
 
-### Iteration 2 workflow
+## Components added in Iteration 3
+
+| Component | Module |
+|---|---|
+| Network Agent | `agents/network.py` |
+| GPU Agent (XID table, telemetry checks; no live DCGM) | `agents/gpu.py` |
+| RCA Coordinator | `agents/coordinator.py` |
+| Structured causes on `AgentDiagnosis` (`ProbableCause` with domain, support, conflicts) and `affected_components` | `models/diagnosis.py` |
+| `RCAResult.cross_domain_relationships`; `DiagnosticRun.rca` | `models/diagnosis.py`, `models/run.py` |
+
+### Workflow (Iteration 3)
 
 ```mermaid
 flowchart LR
     I[Incident] --> T[TriageExecutor]
     T -->|multi-selection edge:<br/>selected_agents| S[storage-agent]
     T --> SC[scheduler-agent]
-    T -. selected but not implemented .-> U[listed as<br/>unavailable_agents]
-    S --> O[DiagnosticRun<br/>root_cause_determined = False]
-    SC --> O
+    T --> N[network-agent]
+    T --> G[gpu-agent]
+    T -->|TriagedIncident:<br/>expected count| C[CoordinatorExecutor]
+    S & SC & N & G -->|AgentDiagnosis| C
+    C --> O[RCAResult<br/>ranked hypotheses, never confirmed]
 ```
+
+### RCA Coordinator rules
+
+- **Ranking**: open hypotheses are sorted by confidence. Ties keep triage order and are
+  reported as ties in the summary.
+- **Ruled out**: causes that specialists ruled out are kept, with the conflicting evidence
+  they cite.
+- **Classification**: `multi-domain` when tool-backed hypotheses span two or more domains;
+  otherwise the triage classification.
+- **Relationships**: an incident item cited by two or more domains, or a component (for
+  example `node:…`) implicated by two or more domains.
+- **Cross-domain checks**: when a node is implicated, checks are recommended for any storage,
+  network or GPU domain that wasn't examined.
+- **Never confirms.** Specialists can't confirm (enforced by the model), and the coordinator
+  doesn't. A static test checks that no agent or workflow code sets `CONFIRMED`.
 
 ## Design notes
 
@@ -96,7 +123,7 @@ flowchart LR
 - **Framework boundary**: agents are plain Python classes. Microsoft Agent Framework
   (`agent-framework-core`) is used only in `workflows/` to route messages between executors.
   An exception in any agent aborts the run (fail closed).
-- **LLM provider abstraction** (not yet implemented): no LLM is called in Iteration 2. When one
+- **LLM provider abstraction** (not yet implemented): no LLM is called yet. When one
   is added, it should only *phrase* findings from the evidence the deterministic agents
   produce, never add facts. It should get no tool access beyond the agent's ScopedGateway,
   and its output should be validated through the same Pydantic models. The provider will be
