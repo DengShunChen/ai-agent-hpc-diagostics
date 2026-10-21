@@ -137,6 +137,32 @@ stateDiagram-v2
     REVISE --> [*]: new run (supersedes)
 ```
 
+## Components added in Iteration 6
+
+| Component | Module |
+|---|---|
+| HTTP API (FastAPI) | `api/routes.py` |
+| Review page (static HTML/CSS/JS, no framework) | `api/static/` |
+| Operator token authentication | `safety/operators.py` |
+| Container image | `containers/Containerfile`, `containers/requirements.lock`, `.containerignore` |
+| Deployment and verification scripts | `scripts/podman_run.sh`, `scripts/container_smoke_test.sh`, `scripts/lock_requirements.sh`, `scripts/run_api.sh` |
+
+### Deployed form
+
+```mermaid
+flowchart LR
+    B[Operator browser / curl] -->|127.0.0.1:8080<br/>Bearer token| C
+    subgraph C[hpc-ai-agent container: rootless, non-root, read-only rootfs, no caps]
+        API[FastAPI routes] --> SVC[ApprovalService]
+        SVC --> WF[Diagnostic workflow<br/>agents + Tool Gateway]
+    end
+    FX[(fixtures/ ro)] --> WF
+    TD[(test_data/ ro)] --> WF
+    KN[(knowledge/ ro)] --> WF
+    TOK[(operators.json ro<br/>hashes, outside repo)] --> API
+    SVC --> AD[(audit-data/ rw<br/>hash-chained logs)]
+```
+
 ## Design notes
 
 - **Evidence traceability**: every `Evidence` has a `kind` (incident report, tool result or

@@ -72,3 +72,26 @@ def service(tmp_path, adapter, gateway, scopes):
     from hpc_agent.workflows.approval_workflow import ApprovalService
 
     return ApprovalService(tmp_path / "state", adapter, gateway, scopes)
+
+
+@pytest.fixture
+def operator_tokens(tmp_path):
+    """Two human operators with freshly issued tokens (test-only, in a temp dir)."""
+    from hpc_agent.safety.operators import OperatorTokens, issue_token
+
+    path = tmp_path / "secrets" / "operators.json"
+    issued = {name: issue_token(path, name) for name in ("ops.wang", "ops.lee")}
+    return OperatorTokens.from_file(path), issued
+
+
+@pytest.fixture
+def api(service, operator_tokens):
+    from fastapi.testclient import TestClient
+
+    from hpc_agent.api.routes import create_app
+
+    tokens, issued = operator_tokens
+    client = TestClient(create_app(service, tokens))
+    client.issued = issued
+    client.auth_header = lambda name="ops.wang": {"Authorization": f"Bearer {issued[name]}"}
+    return client

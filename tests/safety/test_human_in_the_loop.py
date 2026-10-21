@@ -70,4 +70,6 @@ def test_agents_and_diagnosis_cannot_reach_approval():
 def test_only_human_interface_uses_approval_service():
     users = [p.relative_to(PROJECT_ROOT).as_posix() for p in (PROJECT_ROOT / "src").rglob("*.py")
              if "ApprovalService" in p.read_text(encoding="utf-8")]
-    assert sorted(users) == ["src/hpc_agent/main.py", "src/hpc_agent/workflows/approval_workflow.py"]
+    # Human-facing interfaces only: the operator CLI and the authenticated HTTP API.
+    assert sorted(users) == ["src/hpc_agent/api/routes.py", "src/hpc_agent/main.py",
+                             "src/hpc_agent/workflows/approval_workflow.py"]

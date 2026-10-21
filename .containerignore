@@ -1,0 +1,16 @@
+# Build context: only src/, config/ and containers/requirements.lock are copied.
+.git
+.venv
+.env
+.env.*
+audit-data
+fixtures
+test_data
+knowledge
+tests
+docs
+**/__pycache__
+**/*.pyc
+.pytest_cache
+*.pem
+*.key

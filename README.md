@@ -21,7 +21,7 @@ It is **not** an autonomous remediation platform.
 - Production HPC, storage, scheduler, network and GPU access is **disabled**.
 - No SSH automation, no sudo for agents, no shell tools, no automatic remediation.
 
-**Current status: Iteration 5 is complete.** All five specialist roles and the RCA Coordinator
+**Current status: Iteration 6 is complete.** All five specialist roles and the RCA Coordinator
 run end to end through a Microsoft Agent Framework workflow on synthetic data. The workflow
 produces a ranked, evidence-linked RCA with a timeline, and it never confirms a root cause on
 its own.
@@ -31,7 +31,10 @@ its own.
 - The agents are deterministic, and no LLM is called yet.
 - Every saved run waits for a human decision: approve, reject or request revision. Decisions
   are recorded in a tamper-evident audit trail and are never executed.
-- The API, an optional UI and the container come in later iterations.
+- An authenticated HTTP API and a minimal review page serve the same workflow. Operators
+  authenticate with bearer tokens, and only token hashes are stored.
+- The app ships as one rootless, non-root Podman container with a read-only root filesystem
+  and read-only data volumes; `audit-data/` is its only writable volume.
 
 ## Architecture
 
@@ -100,8 +103,9 @@ docs/              architecture.md, safety.md, scenarios.md
 
 - Rocky Linux 10 (developed on 10.2), Python 3.11+ (uses the system `/usr/bin/python3.12`)
 - Project-local packages: `pydantic>=2.7,<3`, `pyyaml>=6,<7`, `agent-framework-core==1.22.0`
-  (Microsoft Agent Framework core only, with no cloud connectors), and `pytest>=8,<9` for tests
-- Podman 5.x (for Iteration 6 only)
+  (Microsoft Agent Framework core only, with no cloud connectors), `fastapi==0.156.4` and
+  `uvicorn==0.54.0`. For tests: `pytest>=8,<9` and `httpx==0.28.1`.
+- Podman 5.x, rootless (developed with 5.8.2, crun, netavark, cgroup v2, SELinux enforcing)
 
 ## Setup
 
@@ -110,7 +114,8 @@ docs/              architecture.md, safety.md, scenarios.md
 ```
 
 ```bash
-.venv/bin/python -m pip install "pydantic>=2.7,<3" "pyyaml>=6,<7" "agent-framework-core==1.22.0" "pytest>=8,<9"
+.venv/bin/python -m pip install "pydantic>=2.7,<3" "pyyaml>=6,<7" "agent-framework-core==1.22.0" \
+    "fastapi==0.156.4" "uvicorn==0.54.0" "pytest>=8,<9" "httpx==0.28.1"
 ```
 
 ## Configuration
@@ -169,12 +174,74 @@ Records are written to `audit-data/`, or to `HPC_AGENT_STATE_DIR` if it's set:
 - `approvals.jsonl` and `audit.jsonl`: append-only and hash-chained. Files are created with
   mode 0600.
 
-## Future Podman deployment (Iteration 6)
+## HTTP API and review page
 
-The plan is one rootless, non-root container. `knowledge/` and `test_data/` will be mounted
-read-only, and `audit-data/` will be the only writable volume. The image will contain no
-credentials or SSH keys, and the container will run without privileged mode or host
-networking.
+Create an operator token. The token file must live outside the repository and have mode
+0600. The token is printed once; only its hash is stored.
+
+```bash
+PYTHONPATH=src .venv/bin/python -m hpc_agent.main create-operator-token ops.yourname --tokens-file ~/.config/hpc-agent/operators.json
+```
+
+Run the API natively. It listens on 127.0.0.1 only:
+
+```bash
+HPC_AGENT_OPERATOR_TOKENS=~/.config/hpc-agent/operators.json scripts/run_api.sh
+```
+
+Open http://127.0.0.1:8080/ and paste your token to use the review page.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /healthz` | Liveness check (no authentication) |
+| `GET /api/whoami` | Operator identity derived from the token |
+| `GET /api/incidents` | Fixture incident IDs |
+| `GET /api/runs`, `POST /api/runs` | List runs; diagnose an incident (body `{"incident_id": …}`) |
+| `GET /api/runs/{id}`, `GET /api/runs/{id}/review`, `GET /api/runs/{id}/history` | Run detail, approval package, transitions |
+| `POST /api/runs/{id}/decision` | Body `{"decision": "APPROVED"\|"REJECTED"\|"REVISION_REQUESTED", "comment": …}`. The response includes `"executed": false`. |
+| `POST /api/runs/{id}/close`, `POST /api/runs/{id}/revise` | Close an approved run; re-diagnose a rejected run |
+| `GET /api/audit/verify` | Verify both hash chains |
+
+Every `/api` endpoint requires `Authorization: Bearer <token>`. If no token file is
+configured, they all return 503.
+
+## Podman deployment
+
+Regenerate the lockfile (only when dependencies change), then build:
+
+```bash
+scripts/lock_requirements.sh
+```
+
+```bash
+podman build -f containers/Containerfile -t localhost/hpc-ai-agent:0.1.0 .
+```
+
+Run the container:
+
+```bash
+HPC_AGENT_OPERATOR_TOKENS=~/.config/hpc-agent/operators.json scripts/podman_run.sh
+```
+
+Check the container's security posture and run one approval cycle:
+
+```bash
+scripts/container_smoke_test.sh
+```
+
+Container properties:
+
+- **Image:** UBI 9 Python 3.12 base, pinned by digest. Dependencies are installed from a
+  hash-locked file, wheels only. The image contains only `src/` and `config/`: no data, no
+  credentials and no SSH keys.
+- **User:** non-root, with the host UID mapped through `--userns=keep-id`.
+- **Hardening:** read-only root filesystem with a small `/tmp` tmpfs, `--cap-drop=ALL`,
+  `no-new-privileges`, and PID and memory limits.
+- **Network:** the port is published on `127.0.0.1` only. No privileged mode, no host
+  networking.
+- **Volumes:** `fixtures/`, `test_data/` and `knowledge/` are mounted `ro,Z`. `audit-data/`
+  is the only writable volume. The token-hash file is mounted `ro` from outside the
+  repository.
 
 ## Known limitations
 
@@ -194,8 +261,14 @@ networking.
 - No API or UI yet.
 - Operator identity is a naming-rule guard only; real authentication is future work.
 - The credential scanner is pattern-based and can miss novel secret formats.
-- The `--operator` identity is asserted, not authenticated. Authentication belongs with
-  the API (Iteration 6+).
+- On the CLI, `--operator` is asserted, not authenticated; the CLI is for a trusted local
+  shell. The HTTP API derives identity from bearer tokens. There is no SSO, rate limiting or
+  TLS: keep it on localhost, or put it behind an authenticating TLS reverse proxy before
+  exposing it.
+- The image is large (about 1.1 GB, mostly the UBI Python base) and includes an `ssh` client
+  binary. Nothing exposes it, but a slimmer base would remove it.
+- With `--userns=keep-id`, the first start on a new image copies and re-owns its layers.
+  That took about 10 minutes on this busy host; later starts take about 1 second.
 - The hash chain detects edited, reordered or deleted records, but not records removed from
   the end of the file. Anchor the latest hash externally if that matters.
 - No MTTR claims are made. MTTR reduction may only be reported after measurement against
@@ -208,6 +281,6 @@ networking.
 3. ✅ Network and GPU agents, RCA Coordinator, cross-domain correlation
 4. ✅ Knowledge tools, temporal evidence correlation, runtime safety guards, call budget
 5. ✅ Human-in-the-loop approval workflow, review package, hash-chained append-only audit logging
-6. API, optional simple UI, Containerfile, Podman deployment
+6. ✅ Authenticated HTTP API, minimal review page, hash-locked Containerfile, rootless Podman deployment
 7. Evaluation, covering domain classification, root-cause accuracy, evidence quality,
    unsupported-claim rate, human override rate and processing time

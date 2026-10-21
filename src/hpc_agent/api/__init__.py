@@ -1,4 +1,1 @@
-"""HTTP API.
-
-Not implemented in Iteration 1. Planned for Iteration 6.
-"""
+"""HTTP API and review page over the approval service."""

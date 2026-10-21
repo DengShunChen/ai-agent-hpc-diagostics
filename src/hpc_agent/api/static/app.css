@@ -1,0 +1,17 @@
+body { font-family: system-ui, sans-serif; margin: 0 auto; max-width: 1100px; padding: 0 16px 48px; color: #1d1d1f; }
+h1 { font-size: 1.4rem; margin-bottom: 0.2rem; }
+h2 { font-size: 1.15rem; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+h3 { font-size: 1rem; margin-bottom: 0.3rem; }
+.banner { background: #fff4d6; border: 1px solid #e6c65c; padding: 6px 10px; border-radius: 4px; }
+.note { background: #eef5ff; border: 1px solid #9cbcf0; padding: 6px 10px; border-radius: 4px; }
+#message { min-height: 1.2em; color: #a00; }
+#login { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+#token { width: 320px; }
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: left; border-bottom: 1px solid #eee; padding: 4px 6px; font-size: 0.9rem; }
+.action { border: 1px solid #ccc; border-radius: 4px; padding: 8px 12px; margin-bottom: 8px; }
+.action dt { font-weight: 600; }
+.action dd { margin: 0 0 6px 0; }
+.source { color: #666; font-size: 0.8rem; }
+.decision { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-start; }
+.decision textarea { width: 420px; height: 3.5em; }

@@ -161,6 +161,12 @@ class ApprovalService:
         )
         return run
 
+    def incident_ids(self) -> list[str]:
+        return self._adapter.list_incident_ids()
+
+    def load_incident(self, incident_id: str) -> Incident:
+        return self._adapter.load_incident(incident_id)
+
     # --- review --------------------------------------------------------------------
     def history(self, run_id: str) -> list[ApprovalRecord]:
         records = [ApprovalRecord.model_validate(r) for r in self.approvals.records() if r["run_id"] == run_id]
@@ -171,6 +177,13 @@ class ApprovalService:
         for previous, current in zip(records, records[1:]):
             transition(previous, current.status, current.operator, current.operator_comment)  # re-validate
         return records
+
+    def overview(self) -> list[ApprovalRecord]:
+        """Latest approval record of every run, most recently started first."""
+        latest: dict[str, ApprovalRecord] = {}
+        for raw in self.approvals.records():
+            latest[raw["run_id"]] = ApprovalRecord.model_validate(raw)
+        return list(reversed(latest.values()))
 
     def status(self, run_id: str) -> ApprovalRecord:
         return self.history(run_id)[-1]

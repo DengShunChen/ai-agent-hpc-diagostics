@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HPC Diagnostics Review</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header>
+    <h1>HPC/AI Diagnostics &mdash; Human Review</h1>
+    <p class="banner">Offline POC &middot; synthetic data &middot; AI proposes, tools provide evidence, humans decide.
+      Recording a decision executes nothing.</p>
+  </header>
+
+  <section id="login">
+    <label for="token">Operator token</label>
+    <input id="token" type="password" autocomplete="off" spellcheck="false">
+    <button id="signin" type="button">Sign in</button>
+    <button id="signout" type="button">Sign out</button>
+    <span id="who"></span>
+  </section>
+
+  <p id="message" role="status"></p>
+
+  <main id="workspace" hidden>
+    <section>
+      <h2>Incidents</h2>
+      <ul id="incidents"></ul>
+    </section>
+    <section>
+      <h2>Runs</h2>
+      <button id="refresh" type="button">Refresh</button>
+      <table>
+        <thead><tr><th>Run</th><th>Incident</th><th>Status</th><th>Updated</th><th></th></tr></thead>
+        <tbody id="runs"></tbody>
+      </table>
+    </section>
+    <section id="review" hidden>
+      <h2>Review <span id="review-run"></span></h2>
+      <p><strong>Status:</strong> <span id="review-status"></span>
+         &middot; <strong>Classification:</strong> <span id="review-class"></span>
+         &middot; <strong>Overall confidence:</strong> <span id="review-confidence"></span></p>
+      <h3>Summary</h3><p id="review-summary"></p>
+      <h3>Hypotheses (unconfirmed)</h3><ul id="review-hypotheses"></ul>
+      <h3>Proposed actions</h3><div id="review-actions"></div>
+      <h3>Missing information</h3><ul id="review-missing"></ul>
+      <h3>Recommended checks</h3><ul id="review-checks"></ul>
+      <p class="note" id="review-note"></p>
+
+      <h3>Decision</h3>
+      <div class="decision">
+        <select id="decision">
+          <option value="APPROVED">Approve</option>
+          <option value="REJECTED">Reject</option>
+          <option value="REVISION_REQUESTED">Request revision</option>
+        </select>
+        <textarea id="comment" maxlength="1000" placeholder="Comment (required to reject or request revision)"></textarea>
+        <button id="decide" type="button">Record decision</button>
+        <button id="close" type="button">Close (after approval)</button>
+        <button id="revise" type="button">Revise (after rejection)</button>
+      </div>
+      <h3>History</h3><ol id="history"></ol>
+    </section>
+  </main>
+</body>
+</html>

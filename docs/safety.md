@@ -135,10 +135,48 @@ missing information**, together with the summary, the unconfirmed hypotheses and
 recommended checks. When there's no proposed action, the package says so: the decision then
 accepts or rejects the assessment and its checks.
 
+## HTTP API
+
+- **Authentication.** Every `/api` endpoint needs a bearer token. The operator identity is
+  derived from the token; request bodies can't name an operator, because extra fields are
+  rejected.
+- **Token storage.** The token file must be outside the repository and mode 0600, and it
+  holds only SHA-256 hashes, compared in constant time. Tokens can't be issued to agent or
+  system identities, and rotating a token invalidates the old one.
+- **Fail closed.** With no token file configured, every authenticated endpoint returns 503.
+  An unauthenticated request changes nothing.
+- **No execution endpoints.** Decisions respond with `"executed": false`.
+- **Request handling.**
+  - Error responses never echo request input, so rejected secrets aren't reflected.
+  - Bodies are limited to 16 KiB, and a POST must send a Content-Length.
+  - Run IDs and static file names are allowlisted, so path traversal returns 404.
+  - `/docs`, `/redoc` and `/openapi.json` are disabled.
+- **Response headers.** Every response carries a strict CSP (`default-src 'none'`,
+  `script-src 'self'`, no inline script or style), `X-Content-Type-Options: nosniff`,
+  `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` and `Cache-Control: no-store`.
+- **Review page.** Server data is rendered only through `textContent`, never parsed as HTML.
+  The token is kept in `sessionStorage`, not `localStorage` or cookies, so CSRF doesn't apply.
+- **Not included.** There is no TLS, SSO or rate limiting. Keep the API on localhost, or
+  put it behind an authenticating TLS reverse proxy.
+
+## Container
+
+The posture is verified by `scripts/container_smoke_test.sh`:
+
+- non-root (host UID through `keep-id`);
+- read-only root filesystem, zero effective capabilities, `no-new-privileges`;
+- not privileged, no host networking, port bound to 127.0.0.1;
+- read-only data and code mounts, with `audit-data/` the only writable volume.
+
+The base image is pinned by digest, and dependencies are installed with `--require-hashes
+--only-binary=:all:`. The image contains no data or credentials.
+
 ## Credential handling
 
 - Only `.env.example` is committed; `.env` is git-ignored.
-- No credentials are needed in Iteration 1.
+- No LLM or infrastructure credentials are used. The only secrets are API operator tokens,
+  created by a human with `create-operator-token`, printed once and stored only as hashes
+  outside the repository.
 - If sensitive data is detected, processing stops with
   "SENSITIVE INFORMATION DETECTED AND NOT PROCESSED." and the value is never displayed.
 

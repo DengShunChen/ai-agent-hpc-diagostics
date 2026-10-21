@@ -1,7 +1,42 @@
-# Placeholder — the container is built in Iteration 6, after the native POC passes its tests.
+# HPC/AI diagnostics POC - single application container.
 #
-# Planned principles (see docs/safety.md):
-#   - minimal Python base image pinned by digest, deterministic dependencies
-#   - non-root USER, no privileged mode, no host networking
-#   - no credentials or SSH keys baked into the image
-#   - knowledge/ and test_data/ mounted read-only (:ro,Z); audit-data/ the only writable volume
+# Build (from the repository root):
+#   podman build -f containers/Containerfile -t localhost/hpc-ai-agent:0.1.0 .
+# Run:  scripts/podman_run.sh   (read-only root fs, no capabilities, localhost-only port)
+#
+# - Base image pinned by digest (set BASE_IMAGE to the digest you reviewed and pulled).
+# - Dependencies installed from a hash-locked file, wheels only.
+# - Runs as a non-root user; no credentials, SSH keys or data are baked into the image.
+# - fixtures/, test_data/ and knowledge/ are mounted read-only at run time;
+#   audit-data/ is the only writable volume. The operator token-hash file is mounted
+#   read-only from outside the repository.
+
+# Pinned 2026-10-21 (image created 2026-10-19). Update the digest deliberately after review.
+ARG BASE_IMAGE=registry.access.redhat.com/ubi9/python-312@sha256:20b989190c0855ea9f565418aaee21c78e9aec3033ae5ab78e501882461fc956
+FROM ${BASE_IMAGE}
+
+LABEL org.opencontainers.image.title="hpc-ai-agent" \
+      org.opencontainers.image.description="Human-in-the-loop multi-agent HPC diagnostics POC (offline, synthetic data)" \
+      org.opencontainers.image.version="0.1.0"
+
+USER 1001
+WORKDIR /opt/app-root/app
+
+COPY --chown=1001:0 containers/requirements.lock /tmp/requirements.lock
+RUN pip install --no-cache-dir --disable-pip-version-check --require-hashes --only-binary=:all: \
+        -r /tmp/requirements.lock \
+    && rm -f /tmp/requirements.lock
+
+COPY --chown=1001:0 src ./src
+COPY --chown=1001:0 config ./config
+
+ENV PYTHONPATH=/opt/app-root/app/src \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    HPC_AGENT_DATA_ROOT=/opt/app-root/app \
+    HPC_AGENT_STATE_DIR=/opt/app-root/app/audit-data \
+    HPC_AGENT_OPERATOR_TOKENS=/run/secrets/operators.json
+
+EXPOSE 8080
+ENTRYPOINT ["python", "-m", "hpc_agent.main"]
+CMD ["serve", "--host", "0.0.0.0", "--port", "8080"]

@@ -10,15 +10,19 @@
     hpc-agent close RUN-ID --operator NAME
     hpc-agent history RUN-ID                          approval transitions
     hpc-agent verify-audit                            verify both hash chains
+    hpc-agent serve [--host 127.0.0.1] [--port 8080]  HTTP API + review page
+    hpc-agent create-operator-token NAME --tokens-file PATH   prints a new token once
 
-Decisions are recorded only; nothing is ever executed. --operator is an asserted identity
-(no authentication in this POC).
+Decisions are recorded only; nothing is ever executed. On the CLI, --operator is an asserted
+identity; the HTTP API instead derives the operator from an authenticated bearer token.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+from pathlib import Path
 
 from hpc_agent.data_adapter import ReadOnlyDataAdapter
 from hpc_agent.models import ApprovalStatus
@@ -45,6 +49,12 @@ def _parser() -> argparse.ArgumentParser:
         cmd.add_argument("--operator", required=True, help="human operator identity")
         cmd.add_argument("--comment", default="")
     sub.add_parser("verify-audit")
+    serve = sub.add_parser("serve", help="run the HTTP API and review page")
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--port", type=int, default=8080)
+    token = sub.add_parser("create-operator-token", help="create or rotate an operator's API token")
+    token.add_argument("operator")
+    token.add_argument("--tokens-file", required=True, type=Path)
     return parser
 
 
@@ -60,10 +70,35 @@ def main(argv: list[str] | None = None) -> int:
         print("registered tools:", ", ".join(gateway.registered_tools()))
         return 0
 
+    from hpc_agent.safety.operators import OperatorAuthError, OperatorTokens, issue_token
     from hpc_agent.workflows.approval_workflow import ApprovalService, default_state_dir, render_review
     from hpc_agent.workflows.diagnostic_workflow import render_report, run_diagnosis
 
+    if args.command == "create-operator-token":
+        try:
+            secret = issue_token(args.tokens_file, args.operator, forbidden_root=adapter.root)
+        except (OperatorAuthError, ValueError) as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 2
+        print(f"Token for {args.operator} (shown once; only its hash is stored in {args.tokens_file}):")
+        print(secret)
+        return 0
+
     service = ApprovalService(default_state_dir(), adapter, gateway)
+    if args.command == "serve":
+        import uvicorn
+
+        from hpc_agent.api.routes import create_app
+
+        tokens_path = os.environ.get("HPC_AGENT_OPERATOR_TOKENS")
+        tokens = None
+        if tokens_path:
+            tokens = OperatorTokens.from_file(Path(tokens_path), forbidden_root=adapter.root)
+        else:
+            print("warning: HPC_AGENT_OPERATOR_TOKENS not set; all authenticated endpoints will refuse",
+                  file=sys.stderr)
+        uvicorn.run(create_app(service, tokens), host=args.host, port=args.port, server_header=False)
+        return 0
     try:
         if args.command == "diagnose":
             incident = adapter.load_incident(args.incident_id)

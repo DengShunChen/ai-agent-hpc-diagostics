@@ -13,11 +13,14 @@ dependencies = [
     "pyyaml>=6,<7",
     # Workflow orchestration only; pinned exactly because the API moves quickly.
     "agent-framework-core==1.22.0",
+    "fastapi==0.156.4",
+    "uvicorn==0.54.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8,<9",
+    "httpx==0.28.1",
 ]
 
 [tool.setuptools.packages.find]
@@ -27,3 +30,5 @@ where = ["src"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-ra --strict-markers"
+# Upstream notice from starlette's TestClient about httpx; not related to this project.
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient`"]
