@@ -53,6 +53,7 @@ def test_unknown_run_and_incident(api):
 
 def test_review_page_served(api):
     page = api.get("/")
-    assert page.status_code == 200 and "Recording a decision executes nothing" in page.text
+    assert page.status_code == 200 and "記錄決定不會執行任何動作" in page.text
+    assert '<html lang="zh-Hant">' in page.text
     assert api.get("/static/app.js").headers["content-type"].startswith("text/javascript")
     assert api.get("/healthz").json() == {"status": "ok"}

@@ -1,24 +1,24 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-Hant">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>HPC Diagnostics Review</title>
+  <title>HPC 診斷人工審查</title>
   <link rel="stylesheet" href="/static/app.css">
   <script src="/static/app.js" defer></script>
 </head>
 <body>
   <header>
-    <h1>HPC/AI Diagnostics &mdash; Human Review</h1>
-    <p class="banner">Offline POC &middot; synthetic data &middot; AI proposes, tools provide evidence, humans decide.
-      Recording a decision executes nothing.</p>
+    <h1>HPC/AI 叢集故障診斷：人工審查</h1>
+    <p class="banner">離線 POC &middot; 合成資料 &middot; AI 提出建議，工具提供證據，由人做決定。
+      記錄決定不會執行任何動作。</p>
   </header>
 
   <section id="login">
-    <label for="token">Operator token</label>
+    <label for="token">操作員 token</label>
     <input id="token" type="password" autocomplete="off" spellcheck="false">
-    <button id="signin" type="button">Sign in</button>
-    <button id="signout" type="button">Sign out</button>
+    <button id="signin" type="button">登入</button>
+    <button id="signout" type="button">登出</button>
     <span id="who"></span>
   </section>
 
@@ -26,42 +26,42 @@
 
   <main id="workspace" hidden>
     <section>
-      <h2>Incidents</h2>
+      <h2>事件</h2>
       <ul id="incidents"></ul>
     </section>
     <section>
-      <h2>Runs</h2>
-      <button id="refresh" type="button">Refresh</button>
+      <h2>診斷紀錄</h2>
+      <button id="refresh" type="button">重新整理</button>
       <table>
-        <thead><tr><th>Run</th><th>Incident</th><th>Status</th><th>Updated</th><th></th></tr></thead>
+        <thead><tr><th>Run</th><th>事件</th><th>狀態</th><th>更新時間</th><th></th></tr></thead>
         <tbody id="runs"></tbody>
       </table>
     </section>
     <section id="review" hidden>
-      <h2>Review <span id="review-run"></span></h2>
-      <p><strong>Status:</strong> <span id="review-status"></span>
-         &middot; <strong>Classification:</strong> <span id="review-class"></span>
-         &middot; <strong>Overall confidence:</strong> <span id="review-confidence"></span></p>
-      <h3>Summary</h3><p id="review-summary"></p>
-      <h3>Hypotheses (unconfirmed)</h3><ul id="review-hypotheses"></ul>
-      <h3>Proposed actions</h3><div id="review-actions"></div>
-      <h3>Missing information</h3><ul id="review-missing"></ul>
-      <h3>Recommended checks</h3><ul id="review-checks"></ul>
+      <h2>審查 <span id="review-run"></span></h2>
+      <p><strong>狀態：</strong><span id="review-status"></span>
+         &middot; <strong>分類：</strong><span id="review-class"></span>
+         &middot; <strong>整體信心度：</strong><span id="review-confidence"></span></p>
+      <h3>摘要</h3><p id="review-summary"></p>
+      <h3>假設（未確認）</h3><ul id="review-hypotheses"></ul>
+      <h3>建議動作</h3><div id="review-actions"></div>
+      <h3>缺少的資訊</h3><ul id="review-missing"></ul>
+      <h3>建議檢查</h3><ul id="review-checks"></ul>
       <p class="note" id="review-note"></p>
 
-      <h3>Decision</h3>
+      <h3>決定</h3>
       <div class="decision">
         <select id="decision">
-          <option value="APPROVED">Approve</option>
-          <option value="REJECTED">Reject</option>
-          <option value="REVISION_REQUESTED">Request revision</option>
+          <option value="APPROVED">核准</option>
+          <option value="REJECTED">退回</option>
+          <option value="REVISION_REQUESTED">要求修改</option>
         </select>
-        <textarea id="comment" maxlength="1000" placeholder="Comment (required to reject or request revision)"></textarea>
-        <button id="decide" type="button">Record decision</button>
-        <button id="close" type="button">Close (after approval)</button>
-        <button id="revise" type="button">Revise (after rejection)</button>
+        <textarea id="comment" maxlength="1000" placeholder="說明（退回或要求修改時必填）"></textarea>
+        <button id="decide" type="button">記錄決定</button>
+        <button id="close" type="button">結案（核准後）</button>
+        <button id="revise" type="button">重新診斷（退回後）</button>
       </div>
-      <h3>History</h3><ol id="history"></ol>
+      <h3>歷程</h3><ol id="history"></ol>
     </section>
   </main>
 </body>

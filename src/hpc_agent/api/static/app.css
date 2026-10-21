@@ -1,4 +1,4 @@
-body { font-family: system-ui, sans-serif; margin: 0 auto; max-width: 1100px; padding: 0 16px 48px; color: #1d1d1f; }
+body { font-family: system-ui, "Noto Sans TC", "Noto Sans CJK TC", "PingFang TC", "Microsoft JhengHei", sans-serif; margin: 0 auto; max-width: 1100px; padding: 0 16px 48px; color: #1d1d1f; }
 h1 { font-size: 1.4rem; margin-bottom: 0.2rem; }
 h2 { font-size: 1.15rem; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
 h3 { font-size: 1rem; margin-bottom: 0.3rem; }
