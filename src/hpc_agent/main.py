@@ -13,6 +13,7 @@
     hpc-agent serve [--host 127.0.0.1] [--port 8080]  HTTP API + review page
     hpc-agent create-operator-token NAME --tokens-file PATH   prints a new token once
     hpc-agent evaluate [--output docs/evaluation.md] [--approvals-log PATH]   score labelled cases
+    hpc-agent explain RUN-ID [--operator NAME]        local-LLM explanation of a run (MODEL_PROVIDER=ollama)
 
 Decisions are recorded only; nothing is ever executed. On the CLI, --operator is an asserted
 identity; the HTTP API instead derives the operator from an authenticated bearer token.
@@ -50,6 +51,9 @@ def _parser() -> argparse.ArgumentParser:
         cmd.add_argument("--operator", required=True, help="human operator identity")
         cmd.add_argument("--comment", default="")
     sub.add_parser("verify-audit")
+    explain = sub.add_parser("explain", help="ask the local LLM to explain a run's evidence")
+    explain.add_argument("run_id")
+    explain.add_argument("--operator", default=None)
     serve = sub.add_parser("serve", help="run the HTTP API and review page")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8080)
@@ -110,6 +114,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     service = ApprovalService(default_state_dir(), adapter, gateway)
+    from hpc_agent.llm.provider import LLMConfigError, provider_from_env
+
     if args.command == "serve":
         import uvicorn
 
@@ -122,7 +128,9 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print("warning: HPC_AGENT_OPERATOR_TOKENS not set; all authenticated endpoints will refuse",
                   file=sys.stderr)
-        uvicorn.run(create_app(service, tokens), host=args.host, port=args.port, server_header=False)
+        llm = provider_from_env()
+        print(f"LLM explainer: {f'{llm.name}:{llm.model}' if llm else 'not configured'}", file=sys.stderr)
+        uvicorn.run(create_app(service, tokens, llm), host=args.host, port=args.port, server_header=False)
         return 0
     try:
         if args.command == "diagnose":
@@ -149,10 +157,25 @@ def main(argv: list[str] | None = None) -> int:
                 who = f" by {r.operator}" if r.operator else ""
                 note = f" - {r.operator_comment}" if r.operator_comment else ""
                 print(f"{r.timestamp.isoformat()}  {r.status}{who}{note}")
+        elif args.command == "explain":
+            llm = provider_from_env()
+            if llm is None:
+                print("error: no LLM configured; set MODEL_PROVIDER=ollama (and MODEL_NAME, MODEL_ENDPOINT)",
+                      file=sys.stderr)
+                return 2
+            print(f"Asking {llm.name}:{llm.model} (local) to explain {args.run_id}...", file=sys.stderr)
+            result = service.explain(args.run_id, llm, operator=args.operator)
+            print(f"Status: {result.status}  ({result.duration_ms / 1000:.1f} s)")
+            if result.text:
+                print(f"\n{result.text}\n")
+                print(f"[{result.disclaimer}]")
+            for reason in result.rejection_reasons:
+                print(f"  - {reason}")
         elif args.command == "verify-audit":
             print(f"audit.jsonl: {service.audit.verify()} records, chain OK")
             print(f"approvals.jsonl: {service.approvals.verify()} records, chain OK")
-    except (KeyError, ValueError, PermissionError, AuditIntegrityError) as error:
+            print(f"explanations.jsonl: {service.explanations.verify()} records, chain OK")
+    except (KeyError, ValueError, PermissionError, AuditIntegrityError, LLMConfigError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
     return 0

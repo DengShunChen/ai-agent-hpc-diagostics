@@ -86,6 +86,33 @@ whose operation the policy denies are all rejected.
 - The `query` argument may contain only letters, digits, spaces and `._/-`, up to 200
   characters. Shell metacharacters, quotes, newlines and `..` are rejected.
 
+## Local LLM
+
+- **Local only.** The endpoint must be `http://` on localhost or `host.containers.internal`.
+  Ollama `:cloud` models, which forward requests off the machine, are refused unless
+  `HPC_AGENT_LLM_ALLOW_CLOUD=1` is set.
+- **No tools.** No tool definitions are ever sent to the model. A static test enforces that
+  the LLM module doesn't import the gateway, data adapter or approval code.
+- **Prompt-injection handling.** Incident text is wrapped as data, and the system prompt says
+  to ignore instructions inside it. Validation catches the result whether or not the model
+  complies.
+- **Fail closed.** The whole explanation is rejected if any of these is true:
+  - a sentence has no citation, or cites an item that doesn't exist;
+  - a number doesn't appear in the evidence;
+  - it contains command-like text (for example `sudo`, `rm -`, `systemctl`, `reboot`,
+    `lctl`, backticks);
+  - it claims a confirmed root cause;
+  - it contains credential-like content.
+
+  Rejected text is never shown; it is kept only in the audit log, and only if it has no
+  credentials. If the model doesn't respond, the status is "unavailable".
+- **No effect on decisions.** An explanation changes no run, confidence, recommendation or
+  approval state (tested). It is stored in the hash-chained `explanations.jsonl` and logged
+  as an AuditRecord.
+- **Container.** Reaching the host's Ollama needs a pasta host-loopback mapping, which
+  exposes *all* host-loopback services to the container. `podman_run.sh` adds it only when
+  `MODEL_PROVIDER` is set.
+
 ## Runtime guards
 
 - **Call budget**: each run allows at most 40 tool calls, shared by all agents. A runaway

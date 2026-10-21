@@ -10,6 +10,7 @@ State lives under a writable state directory, separate from the read-only data r
     runs/<run_id>.json   write-once run snapshots
     approvals.jsonl      hash-chained approval transitions
     audit.jsonl          hash-chained AuditRecords
+    explanations.jsonl   hash-chained LLM explanations (context only; never change a run)
 """
 
 from __future__ import annotations
@@ -20,6 +21,8 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from hpc_agent.data_adapter import ALLOWED_DIRS, ReadOnlyDataAdapter, default_data_root
+from hpc_agent.llm.explainer import Explanation, explain
+from hpc_agent.llm.provider import LLMProvider
 from hpc_agent.logging.audit_logger import AppendOnlyLog
 from hpc_agent.models import (
     ActionForReview,
@@ -33,6 +36,7 @@ from hpc_agent.models import (
 )
 from hpc_agent.models.approval import HUMAN_DECISION_STATUSES, is_human_operator
 from hpc_agent.safety.approval import InvalidTransitionError, transition
+from hpc_agent.safety.policy import Operation, SafetyPolicy
 from hpc_agent.tools.gateway import ToolGateway
 from hpc_agent.workflows.diagnostic_workflow import run_diagnosis
 
@@ -130,6 +134,7 @@ class ApprovalService:
         self.runs = RunStore(resolved / "runs")
         self.approvals = AppendOnlyLog(resolved / "approvals.jsonl")
         self.audit = AppendOnlyLog(resolved / "audit.jsonl")
+        self.explanations = AppendOnlyLog(resolved / "explanations.jsonl")
 
     # --- diagnosis -----------------------------------------------------------------
     def diagnose(self, incident: Incident, supersedes: str | None = None) -> DiagnosticRun:
@@ -190,6 +195,34 @@ class ApprovalService:
 
     def review(self, run_id: str) -> ApprovalRequest:
         return build_approval_request(self.runs.load(run_id), self.status(run_id).status)
+
+    # --- LLM explanation (optional) ---------------------------------------------------
+    def explain(self, run_id: str, provider: LLMProvider, operator: str | None = None) -> Explanation:
+        """Ask the local LLM to explain an existing run. Changes no run or approval state."""
+        SafetyPolicy().require(Operation.GENERATE_EXPLANATION)
+        run = self.runs.load(run_id)
+        status = self.status(run_id).status
+        result = explain(run, provider)
+        audit = AuditRecord(
+            run_id=run_id,
+            incident_id=run.incident_id,
+            start_time=result.generated_at,
+            end_time=result.generated_at,
+            workflow_stage=status,
+            approval_status=status,
+            agents_invoked=["evidence-explainer"],
+            diagnosis=f"LLM explanation {result.status} ({result.provider}:{result.model})",
+            operator=operator,
+            operator_comment="; ".join(result.rejection_reasons)[:500],
+        )
+        self.explanations.append(result.model_dump(mode="json"))
+        self.audit.append(audit.model_dump(mode="json"))
+        return result
+
+    def latest_explanation(self, run_id: str) -> Explanation | None:
+        self.runs.load(run_id)  # validates the run id
+        found = [r for r in self.explanations.records() if r.get("run_id") == run_id]
+        return Explanation.model_validate(found[-1]) if found else None
 
     # --- human decisions -----------------------------------------------------------
     def decide(self, run_id: str, decision: ApprovalStatus, operator: str, comment: str = "") -> ApprovalRecord:

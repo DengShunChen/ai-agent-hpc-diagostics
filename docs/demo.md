@@ -53,8 +53,8 @@ image layers once, which can take several minutes on a busy host.
   measurement against representative incidents.
 - **No accuracy claim for real incidents.** The evaluation labels are synthetic and were
   written by the developer, so they show designed behavior, not field accuracy.
-- **No LLM.** This POC's agents are deterministic and rule-based. The architecture leaves
-  room for an LLM to phrase findings later, under the same validation.
+- **The agents are not LLM agents.** They are deterministic rule-based software agents. The
+  optional local LLM only explains existing evidence, under strict grounding checks.
 - **No production access** of any kind: no FEFS/Lustre, PJM/Slurm, network devices or DCGM.
 
 ## Likely questions

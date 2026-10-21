@@ -12,6 +12,7 @@ class Operation(StrEnum):
     CREATE_DIAGNOSIS = "CREATE_DIAGNOSIS"
     RECOMMEND_ACTION = "RECOMMEND_ACTION"
     RECORD_HUMAN_DECISION = "RECORD_HUMAN_DECISION"
+    GENERATE_EXPLANATION = "GENERATE_EXPLANATION"  # local LLM re-phrases existing evidence only
     RUN_ARBITRARY_COMMAND = "RUN_ARBITRARY_COMMAND"
     SSH_PRODUCTION = "SSH_PRODUCTION"
     MODIFY_PRODUCTION = "MODIFY_PRODUCTION"
@@ -31,6 +32,7 @@ POC_RULES = MappingProxyType(
         Operation.CREATE_DIAGNOSIS: Decision.ALLOW,
         Operation.RECOMMEND_ACTION: Decision.ALLOW,
         Operation.RECORD_HUMAN_DECISION: Decision.ALLOW,
+        Operation.GENERATE_EXPLANATION: Decision.ALLOW,
         Operation.RUN_ARBITRARY_COMMAND: Decision.DENY,
         Operation.SSH_PRODUCTION: Decision.DENY,
         Operation.MODIFY_PRODUCTION: Decision.DENY,

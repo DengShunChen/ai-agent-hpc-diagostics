@@ -13,5 +13,8 @@ th, td { text-align: left; border-bottom: 1px solid #eee; padding: 4px 6px; font
 .action dt { font-weight: 600; }
 .action dd { margin: 0 0 6px 0; }
 .source { color: #666; font-size: 0.8rem; }
+.ai { border: 1px dashed #9a7bd1; border-radius: 4px; padding: 8px 12px; background: #faf7ff; }
+.ai-disclaimer { color: #6b4fa0; font-size: 0.85rem; }
+#ai-text { white-space: pre-wrap; }
 .decision { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-start; }
 .decision textarea { width: 420px; height: 3.5em; }

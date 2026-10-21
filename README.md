@@ -28,7 +28,9 @@ its own.
 
 - Agents cite SOPs, manuals and past incidents from the knowledge base as references only.
 - Every run is checked against runtime safety invariants before it is returned.
-- The agents are deterministic, and no LLM is called yet.
+- The diagnostic agents are deterministic and rule-based. An optional local LLM (Ollama)
+  writes a Traditional Chinese explanation of each run's existing evidence. It can't add
+  facts or change anything (see "Local LLM explainer").
 - Every saved run waits for a human decision: approve, reject or request revision. Decisions
   are recorded in a tamper-evident audit trail and are never executed.
 - An authenticated HTTP API and a minimal review page serve the same workflow. Operators
@@ -191,6 +193,38 @@ The demo walks through all three scenarios, the refused AI approval, the revisio
 tamper detection and the evaluation summary. Add `DEMO_PAUSE=1` to pause between steps. The
 presenter notes are in [docs/demo.md](docs/demo.md).
 
+## Local LLM explainer (optional)
+
+Requires a local Ollama with a local model, for example `ollama pull qwen2.5:3b`.
+
+```bash
+MODEL_PROVIDER=ollama MODEL_NAME=qwen2.5:3b PYTHONPATH=src .venv/bin/python -m hpc_agent.main explain run-0123456789ab
+```
+
+In the review page, set the same variables before starting the API or container, then use
+**產生 AI 說明** ("generate AI explanation").
+
+What the LLM gets and may do:
+
+- It receives the run's numbered evidence (E), hypotheses (H), ruled-out causes (R),
+  missing information (M) and checks (C). Incident text is marked as data, not instructions.
+- It gets no tools and can't change the diagnosis, confidence, recommendations or approval
+  state.
+
+Its answer is rejected as a whole, and never shown, if:
+
+- any sentence lacks a valid citation;
+- any number doesn't appear in the evidence;
+- it contains command-like text;
+- it claims a confirmed root cause;
+- it contains anything credential-like.
+
+Every attempt, accepted or rejected, is stored in the hash-chained `audit-data/explanations.jsonl`
+and logged in the audit trail.
+
+The endpoint must be local, and Ollama `:cloud` models are refused unless you set
+`HPC_AGENT_LLM_ALLOW_CLOUD=1`.
+
 ## Human approval
 
 A saved diagnosis waits in `AWAITING_HUMAN_APPROVAL`. Review the package, which shows each
@@ -293,8 +327,12 @@ Container properties:
 
 ## Known limitations
 
-- Agents are deterministic rule-based analyzers. No LLM is integrated yet, and that needs a
-  configured provider and credentials supplied by a human.
+- **"Agent" here means a software agent, not an LLM agent.** The diagnostic agents are
+  deterministic rule-based components, each with its own role, scoped tools and messages. No
+  model chooses tools or forms hypotheses. The optional LLM only re-phrases existing evidence.
+- A small local model on CPU is slow (tens of seconds to minutes per explanation), and its
+  output is often rejected by the grounding checks. That's by design: an unsupported
+  explanation is never shown.
 - The coordinator never confirms a root cause. Confirmation is left to the human reviewer
   until a confirmation rule is agreed and validated against representative incidents.
 - Cross-domain correlation is rule-based. It links findings through shared incident items

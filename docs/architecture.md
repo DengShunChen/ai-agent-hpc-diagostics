@@ -184,11 +184,19 @@ Human override rates come only from recorded approval logs.
 - **Framework boundary**: agents are plain Python classes. Microsoft Agent Framework
   (`agent-framework-core`) is used only in `workflows/` to route messages between executors.
   An exception in any agent aborts the run (fail closed).
-- **LLM provider abstraction** (not yet implemented): no LLM is called yet. When one
-  is added, it should only *phrase* findings from the evidence the deterministic agents
-  produce, never add facts. It should get no tool access beyond the agent's ScopedGateway,
-  and its output should be validated through the same Pydantic models. The provider will be
-  selected by `MODEL_PROVIDER` / `MODEL_NAME` / `MODEL_ENDPOINT`.
+- **What "agent" means here:** each agent is a software agent: a component with one role,
+  its own scoped tools, and messages routed by the workflow framework. The agents are
+  deterministic and rule-based. No LLM decides which tools to call or what the hypotheses
+  are.
+- **Local LLM explainer** (`llm/provider.py`, `llm/explainer.py`): an optional
+  `LLMProvider` with a local-only `OllamaProvider` (standard-library HTTP, no new
+  dependencies). It writes a Traditional Chinese explanation of an existing run.
+  - It runs outside the diagnostic path, on request through the API or CLI. It has no tools,
+    and a test enforces that it has no access to the gateway, data adapter or approval code.
+  - Its output is validated deterministically and rejected as a whole on any failure. It is
+    stored separately (`explanations.jsonl`) and never changes a run.
+  - The provider is selected by `MODEL_PROVIDER` / `MODEL_NAME` / `MODEL_ENDPOINT`.
+    Agent Framework's Ollama connector could replace the client behind the same interface.
 - **Knowledge layer**: `search_incident_history`, `search_sop` and `search_manual` are
   implemented by `KeywordKnowledgeBase` (`tools/knowledge_tools.py`).
   - It scores documents by distinct matching terms, with title terms counting double, and

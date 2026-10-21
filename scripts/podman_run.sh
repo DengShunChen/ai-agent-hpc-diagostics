@@ -11,6 +11,12 @@
 # all capabilities dropped, no-new-privileges, resource limits, port published on
 # 127.0.0.1 only, data volumes read-only, audit-data the only writable volume.
 # The :Z option relabels the mounted host paths for SELinux (private to this container).
+#
+# Optional local LLM explainer (Ollama on this host, listening on 127.0.0.1:11434):
+#   MODEL_PROVIDER=ollama MODEL_NAME=qwen2.5:3b scripts/podman_run.sh
+# This adds a pasta mapping so the container can reach the host's loopback as
+# host.containers.internal. Note: that mapping exposes ALL host-loopback services to the
+# container, so it is only added when MODEL_PROVIDER is set.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
@@ -23,6 +29,16 @@ APP=/opt/app-root/app
 case "$(realpath "$TOKENS")" in "$ROOT"/*) echo "token file must be outside the repository" >&2; exit 2;; esac
 mkdir -p "$STATE"
 
+LLM_ARGS=()
+if [ -n "${MODEL_PROVIDER:-}" ]; then
+    LLM_ARGS=(--network "pasta:--map-host-loopback,169.254.1.2"
+              --add-host "host.containers.internal:169.254.1.2"
+              -e "MODEL_PROVIDER=$MODEL_PROVIDER"
+              -e "MODEL_NAME=${MODEL_NAME:-qwen2.5:3b}"
+              -e "MODEL_ENDPOINT=http://host.containers.internal:11434"
+              -e "HPC_AGENT_LLM_TIMEOUT=${HPC_AGENT_LLM_TIMEOUT:-300}")
+fi
+
 exec podman run --rm --name "${HPC_AGENT_CONTAINER:-hpc-ai-agent}" \
     --userns=keep-id --user "$(id -u):$(id -g)" \
     --read-only --tmpfs /tmp:rw,size=64m,mode=1777 \
@@ -34,4 +50,4 @@ exec podman run --rm --name "${HPC_AGENT_CONTAINER:-hpc-ai-agent}" \
     -v "$ROOT/knowledge:$APP/knowledge:ro,Z" \
     -v "$STATE:$APP/audit-data:rw,Z" \
     -v "$(realpath "$TOKENS"):/run/secrets/operators.json:ro,Z" \
-    "$@" "$IMAGE"
+    "${LLM_ARGS[@]}" "$@" "$IMAGE"

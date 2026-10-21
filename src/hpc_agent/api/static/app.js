@@ -22,6 +22,7 @@ const DOMAIN = {
   "multi-domain": "跨領域", unknown: "未知",
 };
 const RISK = { low: "低", medium: "中", high: "高" };
+const AI_STATUS = { accepted: "已採用", rejected: "已拒絕（未通過證據檢查）", unavailable: "無法使用（LLM 未回應）" };
 const HTTP_ERRORS = {
   401: "驗證失敗：token 無效或未提供",
   404: "找不到指定的資料",
@@ -177,6 +178,37 @@ function reviewNote(review) {
   return review.actions.length ? base : `${base}本次沒有提出補救動作：決定代表接受或退回這份評估及其建議檢查。`;
 }
 
+function renderExplanation(x) {
+  $("ai-reasons").replaceChildren();
+  if (!x) {
+    $("ai-meta").textContent = "尚未產生。";
+    $("ai-text").textContent = "";
+    $("ai-disclaimer").textContent = "";
+    return;
+  }
+  $("ai-meta").textContent = `${label(AI_STATUS, x.status)} · ${x.provider}:${x.model} · ${localTime(x.generated_at)} · ${(x.duration_ms / 1000).toFixed(1)} 秒`;
+  $("ai-text").textContent = x.text || "";
+  if (x.status !== "accepted") fillList("ai-reasons", x.rejection_reasons);
+  $("ai-disclaimer").textContent = x.disclaimer;
+}
+
+async function loadExplanation(runId) {
+  const result = await api(`/api/runs/${encodeURIComponent(runId)}/explanation`);
+  renderExplanation(result.explanation);
+}
+
+async function generateExplanation() {
+  if (!currentRun) return;
+  const button = $("explain");
+  button.disabled = true;
+  message("正在請本機 LLM 產生說明，CPU 推論可能需要一到數分鐘…");
+  try {
+    const result = await api(`/api/runs/${encodeURIComponent(currentRun)}/explanation`, { method: "POST", body: {} });
+    renderExplanation(result);
+    message(`AI 說明：${label(AI_STATUS, result.status)}`);
+  } catch (err) { message(err.message); } finally { button.disabled = false; }
+}
+
 function historyLine(h) {
   const who = h.operator ? `，操作員 ${h.operator}` : "";
   const note = h.operator_comment ? `：${h.operator_comment}` : "";
@@ -203,6 +235,7 @@ async function openReview(runId) {
     fillList("review-checks", review.recommended_checks);
     $("review-note").textContent = reviewNote(review);
     fillList("history", history.map(historyLine));
+    await loadExplanation(runId);
   } catch (err) { message(err.message); }
 }
 
@@ -225,5 +258,6 @@ document.addEventListener("DOMContentLoaded", () => {
     act("decision", { decision: $("decision").value, comment: $("comment").value }, "決定"));
   $("close").addEventListener("click", () => act("close", { comment: $("comment").value }, "結案"));
   $("revise").addEventListener("click", () => act("revise", { comment: $("comment").value }, "重新診斷"));
+  $("explain").addEventListener("click", generateExplanation);
   if (token()) signIn();
 });

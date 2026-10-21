@@ -11,7 +11,8 @@ AUTHENTICATED = [
     ("GET", "/api/runs/run-000000000000/history", None),
     ("POST", "/api/runs/run-000000000000/decision", {"decision": "APPROVED"}),
     ("POST", "/api/runs/run-000000000000/close", {}), ("POST", "/api/runs/run-000000000000/revise", {}),
-    ("GET", "/api/audit/verify", None),
+    ("GET", "/api/audit/verify", None), ("GET", "/api/llm", None),
+    ("POST", "/api/runs/run-000000000000/explanation", {}), ("GET", "/api/runs/run-000000000000/explanation", None),
 ]
 
 

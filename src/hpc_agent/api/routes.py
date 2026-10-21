@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from hpc_agent.data_adapter import DataAccessError
+from hpc_agent.llm.provider import LLMProvider
 from hpc_agent.models import ApprovalStatus
 from hpc_agent.models.incident import IncidentId
 from hpc_agent.safety.approval import InvalidTransitionError
@@ -61,7 +62,7 @@ def _error(status: int, message: str) -> JSONResponse:
     return JSONResponse(status_code=status, content={"error": message})
 
 
-def create_app(service: ApprovalService, tokens: OperatorTokens | None) -> FastAPI:
+def create_app(service: ApprovalService, tokens: OperatorTokens | None, llm: LLMProvider | None = None) -> FastAPI:
     app = FastAPI(title="HPC/AI diagnostics POC", docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.middleware("http")
@@ -188,6 +189,22 @@ def create_app(service: ApprovalService, tokens: OperatorTokens | None) -> FastA
     def revise(run_id: str, body: CommentRequest, op: Operator) -> dict:
         run = service.revise(run_id, op, body.comment)
         return {"run_id": run.run_id, "supersedes": run.supersedes, "status": service.status(run.run_id).status}
+
+    @app.get("/api/llm")
+    def llm_status(_: Operator) -> dict:
+        return {"configured": llm is not None, "provider": getattr(llm, "name", None),
+                "model": getattr(llm, "model", None)}
+
+    @app.post("/api/runs/{run_id}/explanation", status_code=201)
+    def create_explanation(run_id: str, op: Operator) -> dict:
+        if llm is None:
+            raise HTTPException(503, "no local LLM configured (set MODEL_PROVIDER=ollama)")
+        return service.explain(run_id, llm, operator=op).model_dump(mode="json")
+
+    @app.get("/api/runs/{run_id}/explanation")
+    def get_explanation(run_id: str, _: Operator) -> dict:
+        latest = service.latest_explanation(run_id)
+        return {"explanation": latest.model_dump(mode="json") if latest else None}
 
     @app.get("/api/audit/verify")
     def verify(_: Operator) -> dict:
