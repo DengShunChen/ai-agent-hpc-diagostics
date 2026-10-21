@@ -102,7 +102,11 @@ whose operation the policy denies are all rejected.
   - it contains command-like text (for example `sudo`, `rm -`, `systemctl`, `reboot`,
     `lctl`, backticks);
   - it claims a confirmed root cause;
-  - it contains credential-like content.
+  - it contains credential-like content;
+  - a sentence about ruled-out causes doesn't cite an R item, or claims something was ruled
+    out when nothing was;
+  - it contains Simplified-only characters (the list in `llm/zh.py` excludes characters
+    shared with Traditional, and tests guard against false positives).
 
   Rejected text is never shown; it is kept only in the audit log, and only if it has no
   credentials. If the model doesn't respond, the status is "unavailable".

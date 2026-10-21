@@ -217,7 +217,19 @@ Its answer is rejected as a whole, and never shown, if:
 - any number doesn't appear in the evidence;
 - it contains command-like text;
 - it claims a confirmed root cause;
-- it contains anything credential-like.
+- it contains anything credential-like;
+- a sentence about ruled-out causes doesn't cite an R item, or claims something was ruled out
+  when nothing was;
+- it contains Simplified Chinese characters (the output must be Traditional Chinese).
+
+Measured with qwen2.5:3b on CPU (deterministic decoding), 1 of 3 POC explanations passed,
+taking 19–38 s each. The rejections were real:
+- STORAGE described the missing-information items as "ruled-out causes";
+- SCHEDULER used the Simplified character 「达」;
+- an earlier GPU attempt left a sentence uncited.
+
+Adding these rules to the *prompt* made the model worse (0 of 3), so they are enforced only
+by validation.
 
 Every attempt, accepted or rejected, is stored in the hash-chained `audit-data/explanations.jsonl`
 and logged in the audit trail.

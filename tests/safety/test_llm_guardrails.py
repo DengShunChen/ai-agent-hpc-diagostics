@@ -128,3 +128,76 @@ def test_llm_is_outside_the_diagnostic_path():
         text = path.read_text(encoding="utf-8")
         for forbidden in ("hpc_agent.tools", "approval_workflow", "safety.approval", "data_adapter"):
             assert forbidden not in text, f"{path.name} imports {forbidden}"
+
+
+# --- ruled-out causes must cite R items; Traditional Chinese only ----------------------
+@pytest.fixture
+def storage_run(adapter, gateway, scopes):
+    return run_diagnosis(adapter.load_incident("POC-STORAGE-001"), gateway, scopes)
+
+
+def test_ruled_out_sentence_must_cite_r(sched_run):
+    result = explain(sched_run, FakeProvider("作業被終止 [H1]。walltime 原因已被排除 [M1]。"))
+    assert "mentions ruled-out causes without citing an R item" in result.rejection_reasons
+
+
+def test_missing_information_called_ruled_out_is_rejected(storage_run):
+    # Observed from qwen2.5:3b on POC-STORAGE-001: M items described as ruled-out hypotheses.
+    result = explain(storage_run, FakeProvider("主要假設是容量問題 [H1]。被排除的假設有 [M9]、[M10]。"))
+    assert result.status == "rejected"
+    assert "mentions ruled-out causes, but nothing was ruled out" in result.rejection_reasons
+
+
+def test_saying_nothing_was_ruled_out_is_fine(storage_run):
+    result = explain(storage_run, FakeProvider("主要假設是容量或 OST 不均衡 [H1]。目前沒有已排除的原因 [H1]。"))
+    assert result.status == "accepted", result.rejection_reasons
+
+
+@pytest.mark.parametrize("output", ["作业被终止，原因可能是节点问题 [H1]。", "這是一個測試，但这裡混了簡體字 [H1]。"])
+def test_simplified_chinese_rejected(sched_run, output):
+    result = explain(sched_run, FakeProvider(output))
+    assert any("Simplified Chinese" in r for r in result.rejection_reasons)
+
+
+def test_detector_has_no_false_positives_on_traditional_text():
+    from pathlib import Path
+
+    from hpc_agent.llm.explainer import DISCLAIMER, SYSTEM_PROMPT
+    from hpc_agent.llm.zh import simplified_characters
+
+    static = PROJECT_ROOT / "src" / "hpc_agent" / "api" / "static"
+    samples = [
+        SYSTEM_PROMPT, DISCLAIMER, (static / "app.js").read_text(), (static / "index.html").read_text(),
+        GOOD,
+        # Characters shared by both scripts (後 vs 后, 裡/里, 準/准, 只, 乾/干, 系統, 著/着) must pass.
+        "系統裡只有後續檢查需要準備乾淨的資料，於是先記著這些項目，並在內部確認範圍。",
+        "儲存、排程、網路與 GPU 的證據都已整理；節點狀態、作業終止原因與記憶體事件仍待確認。",
+    ]
+    for text in samples:
+        assert simplified_characters(text) == [], (text[:30], simplified_characters(text))
+
+
+# --- regressions from the second real qwen2.5:3b run (false positives in the checks) ---
+@pytest.fixture
+def gpu_run(adapter, gateway, scopes):
+    return run_diagnosis(adapter.load_incident("POC-GPU-001"), gateway, scopes)
+
+
+def test_not_yet_confirmed_is_not_a_confirmation_claim(storage_run):
+    output = "主要假設是容量或 OST 不均衡 [H1]。根據現有證據，我們尚未確認根本原因為何 [H1]。"
+    result = explain(storage_run, FakeProvider(output))
+    assert result.status == "accepted", result.rejection_reasons
+
+
+def test_warning_is_traditional_and_not_ruled_out_is_a_negation(gpu_run):
+    output = "GPU 3 的健康狀態為警告，但未被排除為根本原因 [E4]。主要假設是應用程式或 CUDA 環境問題 [H1]。"
+    result = explain(gpu_run, FakeProvider(output))
+    assert result.status == "accepted", result.rejection_reasons
+
+
+@pytest.mark.parametrize("text", ["警告", "硬體", "規劃", "夥伴", "塗改", "湧入", "建築", "櫃台", "煙霧",
+                                  "政黨", "敘述", "種類", "萬一"])
+def test_shared_characters_not_flagged(text):
+    from hpc_agent.llm.zh import simplified_characters
+
+    assert simplified_characters(text) == []

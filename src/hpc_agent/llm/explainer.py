@@ -7,6 +7,9 @@ any failure rejects the whole explanation (fail closed):
 
   * every citation must name an existing item, and every sentence must cite one;
   * every number must appear in the provided items (no invented values);
+  * a sentence about ruled-out causes must cite an R item (or, when nothing was ruled
+    out, say so) - M items are missing information, not ruled-out causes;
+  * Traditional Chinese only: Simplified-only characters reject the explanation;
   * no command-like text and no claim that the root cause is confirmed;
   * no credential-like content; bounded length.
 
@@ -23,12 +26,16 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from hpc_agent.llm.provider import LLMProvider, LLMUnavailableError
+from hpc_agent.llm.zh import simplified_characters
 from hpc_agent.models import DiagnosticRun, EvidenceKind, HypothesisStatus
 from hpc_agent.safety.secrets import find_credential_like
 
 DISCLAIMER = "AI 生成的說明，僅供參考：不是證據，也不改變診斷、信心度、建議或核准狀態。"
 MAX_CHARS = 2000
 
+# Kept deliberately short: adding rules for R items and Traditional-only output made
+# qwen2.5:3b drop its citations (0/3 accepted vs 1/3 with this prompt). Those rules are
+# enforced by validate() instead.
 SYSTEM_PROMPT = """你是 HPC/AI 叢集故障診斷系統的「證據說明員」。你的唯一工作，是用繁體中文向人類審查者解釋「資料」區塊中已整理好的診斷結果。
 
 規則：
@@ -49,8 +56,11 @@ _COMMANDS = re.compile(
     r"|\blctl\b|\blfs\s|\bnvidia-smi\b|\bdcgmi\b|\bpdsh\b|\bchmod\b|\bdnf\b|\byum\b",
     re.IGNORECASE,
 )
+_RULED_OUT = re.compile(r"排除|推翻|ruled out", re.IGNORECASE)
+_NEGATION = re.compile(r"沒有|並無|無任何|尚無|未有|未被|並未|不能|無法")
 _CONFIRMED = re.compile(
-    r"(已|被|經)\s*確認(為|是)?(的)?\s*(根本)?原因|根本原因\s*(已|就)?\s*(是|為)(?!否)|確定(是|為)\s*根本原因"
+    r"(?<![未尚])(已|被|經)\s*確認(為|是)?(的)?\s*(根本)?原因"
+    r"|根本原因\s*(已|就)?\s*(是|為)(?!否|何|什麼|哪)|確定(是|為)\s*根本原因"
     r"|root cause (is|was) (confirmed|identified)|confirmed root cause",
     re.IGNORECASE,
 )
@@ -139,6 +149,20 @@ def validate(output: str, context: str, items: dict[str, str], run: DiagnosticRu
         reasons.append(f"numbers not present in the evidence: {', '.join(invented)}")
     if _COMMANDS.search(text):
         reasons.append("contains command-like text")
+    has_ruled_out = any(i.startswith("R") for i in items)
+    for sentence in _SENTENCE.findall(text):
+        if not _RULED_OUT.search(sentence):
+            continue
+        cited = [i.strip() for g in _CITATION.findall(sentence) for i in re.split(r"[,，、]", g)]
+        if has_ruled_out and not any(c.startswith("R") for c in cited):
+            reasons.append("mentions ruled-out causes without citing an R item")
+            break
+        if not has_ruled_out and not _NEGATION.search(sentence):
+            reasons.append("mentions ruled-out causes, but nothing was ruled out")
+            break
+    simplified = simplified_characters(text)
+    if simplified:
+        reasons.append(f"contains Simplified Chinese characters: {''.join(simplified[:12])}")
     if _CONFIRMED.search(text):
         reasons.append("claims a confirmed root cause")
     if find_credential_like(text):
