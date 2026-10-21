@@ -14,12 +14,15 @@ from hpc_agent.models.diagnosis import (
     RiskLevel,
 )
 from hpc_agent.models.incident import Incident, Severity
+from hpc_agent.models.run import DiagnosticRun
+from hpc_agent.models.triage import TriageResult
 
 __all__ = [
     "AgentDiagnosis",
     "ApprovalRecord",
     "ApprovalStatus",
     "AuditRecord",
+    "DiagnosticRun",
     "Domain",
     "Evidence",
     "EvidenceKind",
@@ -31,4 +34,5 @@ __all__ = [
     "RiskLevel",
     "Severity",
     "ToolInvocationRecord",
+    "TriageResult",
 ]

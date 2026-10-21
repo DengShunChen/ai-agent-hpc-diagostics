@@ -48,7 +48,16 @@ criterion.**
   versions, whether the error reproduces on other GPUs or nodes, and the application
   code path.
 
-## Status
+## Status (Iteration 2)
 
-Iteration 1 checks the data side of each scenario in `tests/scenarios/test_scenario_data.py`.
-End-to-end agent runs start in Iteration 2 (POC-STORAGE-001 first).
+You can run each scenario with `./scripts/run_dev.sh diagnose <ID>`. The tests are in
+`tests/scenarios/test_scenario_workflows.py`.
+
+| Scenario | Classification | Agents run | Result |
+|---|---|---|---|
+| POC-STORAGE-001 | storage (related: scheduler) | storage, scheduler | One hypothesis at confidence 0.25, no actions, and the four required missing items and three required checks. The run states that reported high utilization is not a measurement. |
+| POC-SCHEDULER-001 | scheduler | scheduler | SIGKILL and the drained allocated node are kept as unconfirmed possibilities (confidence 0.30). The saved data rules out a walltime limit. The drain reason, OOM events and cross-domain state are listed as missing. |
+| POC-GPU-001 | gpu (related: scheduler) | scheduler | `gpu-agent` is reported as not available and its domain as not examined. No hardware conclusion is made. |
+
+None of the runs claims a root cause. The RCA Coordinator (Iteration 3) will correlate these
+findings.

@@ -1,21 +1,22 @@
-# Agent definitions (not loaded in Iteration 1; agents are implemented from Iteration 2).
-# Each agent may only use the Tool Gateway tools listed here.
+# Per-agent tool scopes, loaded by hpc_agent.config.load_agent_tool_scopes().
+# A scope can only narrow access: tools must also be registered in the Tool Gateway
+# allowlist (src/hpc_agent/tools/gateway.py). Agents not listed here get no tools.
 agents:
   triage-agent:
     domain: triage
-    tools: []
+    tools: []                   # works from the incident only
   storage-agent:
     domain: storage
-    tools: [get_filesystem_usage, get_ost_usage, get_job_status]
+    tools: [get_filesystem_usage, get_ost_usage]
   scheduler-agent:
     domain: scheduler
     tools: [get_job_status, get_node_status]
-  network-agent:
+  network-agent:                # Iteration 3
     domain: network
-    tools: [get_network_status, get_node_status]
-  gpu-agent:
+    tools: [get_network_status]
+  gpu-agent:                    # Iteration 3
     domain: gpu
-    tools: [get_gpu_health, get_node_status]
-  rca-coordinator:
+    tools: [get_gpu_health]
+  rca-coordinator:              # Iteration 3
     domain: coordination
     tools: []

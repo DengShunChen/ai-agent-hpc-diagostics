@@ -41,3 +41,27 @@ def tool_evidence() -> Evidence:
 @pytest.fixture
 def now() -> datetime:
     return datetime(2026, 1, 1, tzinfo=UTC)
+
+
+def make_data_root(tmp_path: Path, incident: dict, test_data: dict | None = None) -> ReadOnlyDataAdapter:
+    """Build an isolated data root holding one incident and optional saved tool outputs.
+
+    test_data maps "domain/dataset" (e.g. "storage/ost_usage") to the JSON payload.
+    """
+    import json
+
+    (tmp_path / "fixtures" / "incidents").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "fixtures" / "incidents" / f"{incident['incident_id']}.json").write_text(json.dumps(incident))
+    for key, payload in (test_data or {}).items():
+        domain, dataset = key.split("/")
+        path = tmp_path / "test_data" / domain / incident["incident_id"] / f"{dataset}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload))
+    return ReadOnlyDataAdapter(tmp_path)
+
+
+@pytest.fixture
+def scopes():
+    from hpc_agent.config import load_agent_tool_scopes
+
+    return load_agent_tool_scopes(PROJECT_ROOT)

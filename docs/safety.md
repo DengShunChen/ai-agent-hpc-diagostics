@@ -46,6 +46,22 @@ are `READ_TEST_DATA` operations and take a single `incident_id` argument, which 
 the ID pattern. Unknown tools, non-string names, extra or missing arguments, and tools
 whose operation the policy denies are all rejected.
 
+## Agent data access
+
+- Each specialist gets a `ScopedGateway` that allows only the tools listed for it in
+  `config/agents.yaml`, and only if they're also in the gateway allowlist. Configuration can
+  narrow access but never widen it. An agent with no entry gets no tools.
+- Every call, including a denied one, is recorded as a `ToolInvocationRecord` with the agent,
+  tool, result status, evidence reference and duration.
+- `agents.yaml` is parsed with `yaml.safe_load`, and malformed configuration raises an error.
+- Agents restate saved values verbatim with their source path. Missing, null or wrongly
+  typed fields (for example a percentage given as a string) are listed as missing
+  information and never estimated.
+- A `RecommendedAction` is only produced when tool-derived evidence supports it.
+- `DiagnosticRun.root_cause_determined` is typed as `Literal[False]` until the RCA
+  Coordinator exists.
+- The static test also bans the framework's `SkillScriptRunner` and unsafe YAML loaders.
+
 ## Safety policy
 
 The policy is default deny. It allows `READ_TEST_DATA`, `READ_KNOWLEDGE`,

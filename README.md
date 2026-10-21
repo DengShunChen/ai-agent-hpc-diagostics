@@ -21,8 +21,10 @@ It is **not** an autonomous remediation platform.
 - Production HPC, storage, scheduler, network and GPU access is **disabled**.
 - No SSH automation, no sudo for agents, no shell tools, no automatic remediation.
 
-**Current status: Iteration 1 is complete.** It provides the models, fixtures, Tool Gateway,
-safety policy and tests. Agents, LLM calls, the API and the container come in later iterations.
+**Current status: Iteration 2 is complete.** The Triage, Storage and Scheduler agents run end
+to end through a Microsoft Agent Framework workflow on synthetic data. The agents are
+deterministic and evidence-grounded, and no LLM is called yet. The Network and GPU agents, the
+RCA Coordinator, approvals, the API and the container come in later iterations.
 
 ## Architecture
 
@@ -49,16 +51,16 @@ Gateway. See [docs/architecture.md](docs/architecture.md).
 
 See [docs/safety.md](docs/safety.md).
 
-## Agent responsibilities (planned, Iterations 2–3)
+## Agent responsibilities
 
-| Agent | Responsibility |
-|---|---|
-| Triage | Extract symptoms, identify available/missing evidence, classify domain, select specialists |
-| Storage | FEFS/Lustre: capacity, OST utilization/imbalance, I/O errors, health |
-| Scheduler | PJM/Slurm: job/node/queue state, allocation, abnormal termination |
-| Network | NIC/bond/Ethernet status, interface errors, saved SNMP/monitoring data |
-| GPU | Saved DCGM-style health, XID/CUDA errors, memory, PCIe, NVLink, power, thermal |
-| RCA Coordinator | Correlate findings, rank hypotheses, separate fact / hypothesis / recommendation / missing info |
+| Agent | Status | Responsibility |
+|---|---|---|
+| Triage | ✅ Iteration 2 | Extract symptoms, identify available/missing evidence, classify domain, select specialists |
+| Storage | ✅ Iteration 2 | FEFS/Lustre: capacity, OST utilization/imbalance, I/O errors, health |
+| Scheduler | ✅ Iteration 2 | PJM/Slurm: job/node state, exit signals, walltime, abnormal termination |
+| Network | Iteration 3 | NIC/bond/Ethernet status, interface errors, saved SNMP/monitoring data |
+| GPU | Iteration 3 | Saved DCGM-style health, XID/CUDA errors, memory, PCIe, NVLink, power, thermal |
+| RCA Coordinator | Iteration 3 | Correlate findings, rank hypotheses, separate fact / hypothesis / recommendation / missing info |
 
 ## Workflow and approval states
 
@@ -70,11 +72,15 @@ plus `REJECTED` and `REVISION_REQUESTED`, which both lead to `REVISE` and then b
 ```
 config/            agents.yaml, app.yaml (documented settings; not loaded yet)
 src/hpc_agent/
-  models/          Incident, AgentDiagnosis, RCAResult, AuditRecord, ApprovalRecord
+  models/          Incident, AgentDiagnosis, RCAResult, AuditRecord, ApprovalRecord,
+                   TriageResult, DiagnosticRun
+  agents/          triage.py, storage.py, scheduler.py, evidence.py (network/gpu/coordinator: placeholders)
+  workflows/       diagnostic_workflow.py (Agent Framework orchestration + report)
   safety/          policy.py (default deny), approval.py (state machine), secrets.py
-  tools/           gateway.py (allowlist) + per-domain read-only tools
+  tools/           gateway.py (allowlist, per-agent ScopedGateway) + per-domain read-only tools
+  config.py        loads per-agent tool scopes from config/agents.yaml
   data_adapter.py  read-only access to fixtures/, test_data/, knowledge/
-  agents/ workflows/ api/ logging/   placeholders for later iterations
+  api/ logging/    placeholders for later iterations
 fixtures/incidents/   synthetic POC incidents
 test_data/<domain>/<incident_id>/   saved synthetic tool outputs
 knowledge/{incidents,sop,manuals}/  knowledge base (empty in Iteration 1)
@@ -86,9 +92,9 @@ docs/              architecture.md, safety.md, scenarios.md
 ## Requirements
 
 - Rocky Linux 10 (developed on 10.2), Python 3.11+ (uses the system `/usr/bin/python3.12`)
-- Project-local packages: `pydantic>=2.7,<3`, `pytest>=8,<9`
+- Project-local packages: `pydantic>=2.7,<3`, `pyyaml>=6,<7`, `agent-framework-core==1.22.0`
+  (Microsoft Agent Framework core only, with no cloud connectors), and `pytest>=8,<9` for tests
 - Podman 5.x (for Iteration 6 only)
-- Microsoft Agent Framework: not needed yet (Iteration 2+)
 
 ## Setup
 
@@ -97,13 +103,15 @@ docs/              architecture.md, safety.md, scenarios.md
 ```
 
 ```bash
-.venv/bin/python -m pip install "pydantic>=2.7,<3" "pytest>=8,<9"
+.venv/bin/python -m pip install "pydantic>=2.7,<3" "pyyaml>=6,<7" "agent-framework-core==1.22.0" "pytest>=8,<9"
 ```
 
 ## Configuration
 
 Copy `.env.example` to `.env` and fill it in locally. **Never commit `.env`.** Iteration 1 needs
 no configuration. `HPC_AGENT_DATA_ROOT` can point the data adapter at another data root.
+`config/agents.yaml` sets which gateway tools each agent may call. It can only narrow the
+gateway allowlist, never widen it.
 
 ## Running tests
 
@@ -113,13 +121,15 @@ no configuration. `HPC_AGENT_DATA_ROOT` can point the data adapter at another da
 
 ## Running scenarios
 
-Iteration 1 validates the scenario fixtures and lists the allowlisted tools:
+Run a diagnosis on a fixture incident. The report keeps facts, hypotheses, missing
+information, checks and proposed actions in separate sections:
 
 ```bash
-./scripts/run_dev.sh
+./scripts/run_dev.sh diagnose POC-STORAGE-001
 ```
 
-End-to-end scenario runs start in Iteration 2. See [docs/scenarios.md](docs/scenarios.md).
+Running `./scripts/run_dev.sh` with no arguments validates every fixture and lists the
+allowlisted tools. See [docs/scenarios.md](docs/scenarios.md).
 
 ## Future Podman deployment (Iteration 6)
 
@@ -130,7 +140,13 @@ networking.
 
 ## Known limitations
 
-- No agents, LLM integration, workflow, API or UI yet.
+- Agents are deterministic rule-based analyzers. No LLM is integrated yet, and that needs a
+  configured provider and credentials supplied by a human.
+- The Network and GPU agents and the RCA Coordinator are not implemented. Runs list such
+  domains as not examined and never claim a root cause.
+- Triage uses keyword signals, so unusual wording can be misclassified as `unknown`. That
+  outcome is safe, but not useful.
+- No API or UI yet.
 - Operator identity is a naming-rule guard only; real authentication is future work.
 - The credential scanner is pattern-based and can miss novel secret formats.
 - Audit records are modelled but not yet persisted (Iteration 5).
@@ -140,7 +156,7 @@ networking.
 ## Roadmap
 
 1. ✅ Environment, models, fixtures, safety foundation, tests
-2. Triage, Storage, Scheduler agents (first end-to-end run on POC-STORAGE-001)
+2. ✅ Triage, Storage, Scheduler agents; Agent Framework workflow; end-to-end scenario runs
 3. Network and GPU agents, RCA Coordinator
 4. Full Tool Gateway, knowledge tools, evidence correlation
 5. Human-in-the-loop workflow, append-only audit logging

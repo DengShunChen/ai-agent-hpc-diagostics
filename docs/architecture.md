@@ -62,14 +62,44 @@ Rocky Linux 10
 | Read-only data adapter | `data_adapter.py` |
 | Tool Gateway + read-only domain tools | `tools/gateway.py`, `tools/*_tools.py` |
 
+## Components added in Iteration 2
+
+| Component | Module |
+|---|---|
+| Triage Agent | `agents/triage.py` |
+| Storage Agent | `agents/storage.py` |
+| Scheduler Agent | `agents/scheduler.py` |
+| Evidence helpers, domain keyword signals | `agents/evidence.py` |
+| Per-agent ScopedGateway (scope ∩ allowlist, records every call) | `tools/gateway.py` |
+| Agent tool scopes | `config/agents.yaml`, `config.py` |
+| TriageResult, DiagnosticRun | `models/triage.py`, `models/run.py` |
+| Agent Framework workflow + text report | `workflows/diagnostic_workflow.py` |
+
+### Iteration 2 workflow
+
+```mermaid
+flowchart LR
+    I[Incident] --> T[TriageExecutor]
+    T -->|multi-selection edge:<br/>selected_agents| S[storage-agent]
+    T --> SC[scheduler-agent]
+    T -. selected but not implemented .-> U[listed as<br/>unavailable_agents]
+    S --> O[DiagnosticRun<br/>root_cause_determined = False]
+    SC --> O
+```
+
 ## Design notes
 
 - **Evidence traceability**: every `Evidence` has a `kind` (incident report, tool result or
   knowledge) and a `source` reference. Tool results carry the relative path of the saved
   data they came from.
 - **No invented data**: if a tool has no saved data, it returns `no_data` with `data=None`.
-- **LLM provider abstraction** (Iteration 2+): domain logic depends only on the models and the
-  gateway, not on a vendor SDK. The provider is selected by `MODEL_PROVIDER` / `MODEL_NAME` /
-  `MODEL_ENDPOINT`.
+- **Framework boundary**: agents are plain Python classes. Microsoft Agent Framework
+  (`agent-framework-core`) is used only in `workflows/` to route messages between executors.
+  An exception in any agent aborts the run (fail closed).
+- **LLM provider abstraction** (not yet implemented): no LLM is called in Iteration 2. When one
+  is added, it should only *phrase* findings from the evidence the deterministic agents
+  produce, never add facts. It should get no tool access beyond the agent's ScopedGateway,
+  and its output should be validated through the same Pydantic models. The provider will be
+  selected by `MODEL_PROVIDER` / `MODEL_NAME` / `MODEL_ENDPOINT`.
 - **Knowledge layer** (Iteration 4): `search_incident_history`, `search_sop` and `search_manual`
   will start as simple file search. A future RAG backend can replace them behind the same interface.

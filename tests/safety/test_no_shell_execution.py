@@ -14,6 +14,8 @@ FORBIDDEN = {
     "remote/pty libs": r"^\s*(import|from)\s+(paramiko|fabric|pexpect|pty|asyncssh|telnetlib)\b",
     "asyncio subprocess": r"\bcreate_subprocess_(exec|shell)\b",
     "dynamic import": r"\b__import__\s*\(|\bimportlib\.import_module\s*\(",
+    "framework script runner": r"\bSkillScriptRunner\b",
+    "unsafe yaml load": r"\byaml\.(load|unsafe_load|full_load)\s*\(",
 }
 SOURCES = sorted((PROJECT_ROOT / "src").rglob("*.py"))
 

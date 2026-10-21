@@ -11,7 +11,8 @@ There is no shell backend: handlers are plain Python functions reading saved dat
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -19,6 +20,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 from hpc_agent.data_adapter import ReadOnlyDataAdapter
+from hpc_agent.models.audit import ToolInvocationRecord
 from hpc_agent.models.incident import INCIDENT_ID_PATTERN
 from hpc_agent.safety.policy import Operation, SafetyPolicy
 
@@ -112,6 +114,49 @@ class ToolGateway:
             if not isinstance(value, str) or not _ARG_PATTERNS[key].match(value):
                 raise ToolArgumentError(f"invalid value for argument {key!r}")
         return spec.handler(**kwargs)
+
+
+class ScopedGateway:
+    """An agent's view of the gateway: only its configured tools, every call recorded.
+
+    The scope is intersected with the gateway's registry, so configuration can narrow
+    access but never widen it. An agent with no configured scope gets no tools.
+    """
+
+    def __init__(
+        self,
+        gateway: ToolGateway,
+        agent: str,
+        scopes: Mapping[str, frozenset[str]],
+        log: list[ToolInvocationRecord],
+    ) -> None:
+        self._gateway = gateway
+        self.agent = agent
+        self.allowed_tools = scopes.get(agent, frozenset()) & set(gateway.registered_tools())
+        self._log = log
+
+    def invoke(self, tool: str, *, incident_id: str) -> ToolResult:
+        if tool not in self.allowed_tools:
+            raise ToolNotAllowedError(f"{self.agent} is not permitted to call {tool!r}")
+        start = time.perf_counter()
+        try:
+            result = self._gateway.invoke(tool, incident_id=incident_id)
+        except Exception:
+            self._record(tool, "error", None, start)
+            raise
+        self._record(tool, result.status, result.source, start)
+        return result
+
+    def _record(self, tool: str, status: str, reference: str | None, start: float) -> None:
+        self._log.append(
+            ToolInvocationRecord(
+                tool=tool,
+                agent=self.agent,
+                result_status=status,
+                evidence_reference=reference,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+        )
 
 
 def read_saved_result(
