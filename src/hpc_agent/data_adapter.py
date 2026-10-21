@@ -57,6 +57,25 @@ class ReadOnlyDataAdapter:
         assert_no_credentials(data, context="/".join(segments))
         return data
 
+    def read_text(self, *segments: str) -> str:
+        """A Markdown document from knowledge/, size-limited and credential-scanned."""
+        if not segments or segments[0] != "knowledge" or not segments[-1].endswith(".md"):
+            raise DataAccessError("only knowledge/*.md documents can be read as text")
+        path = self._resolve(*segments)
+        if not path.is_file():
+            raise FileNotFoundError("/".join(segments))
+        if path.stat().st_size > MAX_FILE_BYTES:
+            raise DataAccessError(f"file exceeds {MAX_FILE_BYTES} bytes: {'/'.join(segments)}")
+        text = path.read_text(encoding="utf-8")
+        assert_no_credentials(text.splitlines(), context="/".join(segments))
+        return text
+
+    def list_files(self, *segments: str, suffix: str) -> list[str]:
+        directory = self._resolve(*segments)
+        if not directory.is_dir():
+            return []
+        return sorted(p.name for p in directory.iterdir() if p.is_file() and p.suffix == suffix)
+
     def load_incident(self, incident_id: str) -> Incident:
         if not re.match(INCIDENT_ID_PATTERN, incident_id or ""):
             raise DataAccessError(f"invalid incident id: {incident_id!r}")

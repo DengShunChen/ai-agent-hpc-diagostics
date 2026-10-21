@@ -7,7 +7,7 @@ increasing, so counter-based findings stay hypotheses.
 
 from __future__ import annotations
 
-from hpc_agent.agents.evidence import dedupe, incident_evidence, number, tool_evidence
+from hpc_agent.agents.evidence import dedupe, gather_references, incident_evidence, number, timestamp, tool_evidence
 from hpc_agent.models import AgentDiagnosis, Domain, Evidence, Incident, ProbableCause
 from hpc_agent.tools.gateway import ScopedGateway, ToolStatus
 
@@ -16,7 +16,8 @@ class NetworkAgent:
     name = "network-agent"
 
     def diagnose(self, incident: Incident, gateway: ScopedGateway) -> AgentDiagnosis:
-        evidence: list[Evidence] = incident_evidence(incident, Domain.NETWORK)
+        reported = incident_evidence(incident, Domain.NETWORK)
+        evidence: list[Evidence] = list(reported)
         missing: list[str] = []
         checks: list[str] = []
         components: list[str] = []
@@ -42,13 +43,14 @@ class NetworkAgent:
                     continue
                 node, iface = entry["node"], entry["interface"]
                 label = f"{node}/{iface}"
+                changed = timestamp(entry.get("last_change"))
                 implicated = False
 
                 state = entry.get("state")
                 if not isinstance(state, str):
                     missing.append(f"link state of {label}")
                 else:
-                    item = tool_evidence(status, f"{label} state={state}")
+                    item = tool_evidence(status, f"{label} state={state}", changed)
                     evidence.append(item)
                     if state.lower() != "up":
                         implicated = True
@@ -95,7 +97,7 @@ class NetworkAgent:
                 flaps = number(entry.get("link_flaps"))
                 if flaps is not None and flaps > 0:
                     implicated = True
-                    item = tool_evidence(status, f"{label} link_flaps={flaps:g}")
+                    item = tool_evidence(status, f"{label} link_flaps={flaps:g}", changed)
                     evidence.append(item)
                     hypothesis(f"Link {label} flapped; intermittent connectivity is possible", 0.35, [item])
 
@@ -104,6 +106,10 @@ class NetworkAgent:
                     missing.append(f"switch-side port status for {label}")
                     checks.append(f"review saved switch-port counters and logs for {label}")
 
+        references, reference_checks = gather_references(
+            gateway, Domain.NETWORK, [c.cause for c in causes] or [e.statement for e in reported]
+        )
+        checks += reference_checks
         return AgentDiagnosis(
             agent=self.name,
             domain=Domain.NETWORK,
@@ -113,6 +119,7 @@ class NetworkAgent:
             affected_components=dedupe(components),
             recommended_checks=dedupe(checks),
             missing_information=dedupe(missing),
+            references=references,
             confidence=max((c.confidence for c in causes), default=0.0),
         )
 

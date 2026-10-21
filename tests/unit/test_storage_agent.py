@@ -33,7 +33,8 @@ def test_no_data_gives_hypothesis_only(tmp_path, scopes):
     assert d.affected_components == []
     assert d.recommended_actions == []
     assert all(e.kind is EvidenceKind.INCIDENT_REPORT for e in d.evidence)
-    assert [r.result_status for r in log] == ["no_data", "no_data"]
+    assert [(r.tool, r.result_status) for r in log if r.tool.startswith("get_")] == [
+        ("get_filesystem_usage", "no_data"), ("get_ost_usage", "no_data")]
 
 
 def test_full_ost_supports_capacity_hypothesis(tmp_path, scopes):

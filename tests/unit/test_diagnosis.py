@@ -100,3 +100,26 @@ def test_hypotheses_excludes_ruled_out(reported, tool_evidence):
         ],
     )
     assert [c.cause for c in d.hypotheses] == ["a"]
+
+
+def test_knowledge_cannot_be_evidence():
+    from hpc_agent.models import Evidence
+    kb = Evidence(kind="knowledge", source="knowledge:knowledge/sop/SOP-STOR-001.md", statement="SOP")
+    with pytest.raises(ValidationError, match="references"):
+        AgentDiagnosis(agent="storage-agent", domain="storage", evidence=[kb])
+    with pytest.raises(ValidationError, match="references"):
+        ProbableCause(cause="x", supporting_evidence=[kb], confidence=0.1)
+    AgentDiagnosis(agent="storage-agent", domain="storage", references=[kb])
+
+
+def test_references_must_be_knowledge(reported):
+    with pytest.raises(ValidationError, match="knowledge-base"):
+        AgentDiagnosis(agent="storage-agent", domain="storage", references=[reported])
+
+
+def test_observed_at_must_be_timezone_aware():
+    from datetime import datetime
+
+    from hpc_agent.models import Evidence
+    with pytest.raises(ValidationError):
+        Evidence(kind="tool_result", source="tool:x:y", statement="s", observed_at=datetime(2026, 1, 1))

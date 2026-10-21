@@ -36,7 +36,13 @@ _FORBIDDEN_NAME_TOKENS = frozenset(
     {"os", "system", "run", "spawn", "kill", "reboot", "restart", "delete", "rm", "write", "set"}
 )
 _TOOL_NAME = re.compile(r"^[a-z][a-z0-9_]{2,63}$")
-_ARG_PATTERNS = {"incident_id": re.compile(INCIDENT_ID_PATTERN)}
+# Every argument type a tool may declare. Free text is limited to search terms: no shell
+# metacharacters, quotes, newlines or path traversal can pass.
+_ARG_PATTERNS = {
+    "incident_id": re.compile(INCIDENT_ID_PATTERN),
+    "query": re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._/-]{0,199}"),
+}
+DEFAULT_CALL_BUDGET = 40
 
 
 class ToolNotAllowedError(PermissionError):
@@ -111,9 +117,21 @@ class ToolGateway:
                 f"{name} expects arguments {sorted(spec.parameters)}, got {sorted(kwargs)}"
             )
         for key, value in kwargs.items():
-            if not isinstance(value, str) or not _ARG_PATTERNS[key].match(value):
+            if not isinstance(value, str) or not _ARG_PATTERNS[key].fullmatch(value) or ".." in value:
                 raise ToolArgumentError(f"invalid value for argument {key!r}")
         return spec.handler(**kwargs)
+
+
+class CallBudget:
+    """A per-run limit on tool calls, shared by all agents in the run."""
+
+    def __init__(self, limit: int = DEFAULT_CALL_BUDGET) -> None:
+        self.remaining = limit
+
+    def spend(self, agent: str, tool: str) -> None:
+        if self.remaining <= 0:
+            raise ToolNotAllowedError(f"tool call budget exhausted ({agent} -> {tool})")
+        self.remaining -= 1
 
 
 class ScopedGateway:
@@ -129,18 +147,21 @@ class ScopedGateway:
         agent: str,
         scopes: Mapping[str, frozenset[str]],
         log: list[ToolInvocationRecord],
+        budget: CallBudget | None = None,
     ) -> None:
         self._gateway = gateway
         self.agent = agent
         self.allowed_tools = scopes.get(agent, frozenset()) & set(gateway.registered_tools())
         self._log = log
+        self._budget = budget or CallBudget()
 
-    def invoke(self, tool: str, *, incident_id: str) -> ToolResult:
+    def invoke(self, tool: str, **kwargs: str) -> ToolResult:
         if tool not in self.allowed_tools:
             raise ToolNotAllowedError(f"{self.agent} is not permitted to call {tool!r}")
+        self._budget.spend(self.agent, tool)
         start = time.perf_counter()
         try:
-            result = self._gateway.invoke(tool, incident_id=incident_id)
+            result = self._gateway.invoke(tool, **kwargs)
         except Exception:
             self._record(tool, "error", None, start)
             raise
@@ -183,11 +204,11 @@ def saved_data_tool(
 
 
 def build_default_gateway(adapter: ReadOnlyDataAdapter | None = None) -> ToolGateway:
-    from hpc_agent.tools import gpu_tools, network_tools, scheduler_tools, storage_tools
+    from hpc_agent.tools import gpu_tools, knowledge_tools, network_tools, scheduler_tools, storage_tools
 
     adapter = adapter or ReadOnlyDataAdapter()
     gateway = ToolGateway()
-    for module in (storage_tools, scheduler_tools, network_tools, gpu_tools):
+    for module in (storage_tools, scheduler_tools, network_tools, gpu_tools, knowledge_tools):
         for spec in module.tool_specs(adapter):
             gateway.register(spec)
     return gateway

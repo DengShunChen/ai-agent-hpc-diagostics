@@ -31,7 +31,8 @@ from hpc_agent.models import (
     ToolInvocationRecord,
     TriageResult,
 )
-from hpc_agent.tools.gateway import ScopedGateway, ToolGateway
+from hpc_agent.safety.guards import verify_run
+from hpc_agent.tools.gateway import CallBudget, ScopedGateway, ToolGateway
 
 
 class Specialist(Protocol):
@@ -126,12 +127,13 @@ async def run_diagnosis_async(
     scopes = load_agent_tool_scopes() if scopes is None else scopes
     specialists = default_specialists() if specialists is None else specialists
     log: list[ToolInvocationRecord] = []
+    budget = CallBudget()
     start = datetime.now(UTC)
 
     implemented = frozenset(a.name for a in specialists)
     triage_executor = TriageExecutor(TriageAgent())
     coordinator = CoordinatorExecutor(RCACoordinator(), implemented)
-    workers = [SpecialistExecutor(a, ScopedGateway(gateway, a.name, scopes, log)) for a in specialists]
+    workers = [SpecialistExecutor(a, ScopedGateway(gateway, a.name, scopes, log, budget)) for a in specialists]
     builder = (
         WorkflowBuilder(start_executor=triage_executor, output_from="all")
         .add_multi_selection_edge_group(triage_executor, workers, _select)
@@ -146,7 +148,7 @@ async def run_diagnosis_async(
     rcas = [o for o in outputs if isinstance(o, RCAResult)]
     if len(rcas) != 1:
         raise RuntimeError(f"expected exactly one RCA result, got {len(rcas)}")
-    return DiagnosticRun(
+    run = DiagnosticRun(
         run_id=f"run-{uuid.uuid4().hex[:12]}",
         incident_id=incident.incident_id,
         start_time=start,
@@ -157,6 +159,8 @@ async def run_diagnosis_async(
         rca=rcas[0],
         tools_invoked=log,
     )
+    verify_run(run, scopes)
+    return run
 
 
 def run_diagnosis(
@@ -205,6 +209,8 @@ def render_report(run: DiagnosticRun) -> str:
         lines += [f"       contradicted by: {e.statement}   <{e.source}>" for e in c.conflicting_evidence]
     if not ruled_out:
         lines.append("  none")
+    lines.append("\nTIMELINE (relative to incident time)" if run.rca.timeline else "\nTIMELINE")
+    lines += [f"  {e.observed_at.isoformat()}  {e.statement}   <{e.source}>" for e in rca.timeline] or ["  none"]
     lines.append("\nCROSS-DOMAIN RELATIONSHIPS")
     lines += [f"  - {r}" for r in rca.cross_domain_relationships] or ["  none"]
     lines.append("\nMISSING INFORMATION")
@@ -216,6 +222,8 @@ def render_report(run: DiagnosticRun) -> str:
         f"  - {a.action} | risk={a.risk} | component={a.affected_component} | reason: {a.reason}"
         for a in rca.recommended_actions
     ] or ["  none"]
+    lines.append("\nREFERENCES (knowledge base: context only, not evidence about this incident)")
+    lines += [f"  - {r.statement}   <{r.source}>" for r in rca.references] or ["  none"]
     lines.append("\nTOOLS INVOKED")
     lines += [f"  - {r.agent}: {r.tool} -> {r.result_status}" for r in run.tools_invoked] or ["  none"]
     return "\n".join(lines)

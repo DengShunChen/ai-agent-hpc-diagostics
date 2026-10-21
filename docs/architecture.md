@@ -128,5 +128,38 @@ flowchart LR
   produce, never add facts. It should get no tool access beyond the agent's ScopedGateway,
   and its output should be validated through the same Pydantic models. The provider will be
   selected by `MODEL_PROVIDER` / `MODEL_NAME` / `MODEL_ENDPOINT`.
-- **Knowledge layer** (Iteration 4): `search_incident_history`, `search_sop` and `search_manual`
-  will start as simple file search. A future RAG backend can replace them behind the same interface.
+- **Knowledge layer**: `search_incident_history`, `search_sop` and `search_manual` are
+  implemented by `KeywordKnowledgeBase` (`tools/knowledge_tools.py`).
+  - It scores documents by distinct matching terms, with title terms counting double, and
+    ignores identifiers such as node names.
+  - It needs at least two matching terms, and keeps only hits scoring at least half of the
+    best one.
+  - The `KnowledgeBase` protocol lets a RAG backend replace it without changing callers.
+
+## Components added in Iteration 4
+
+| Component | Module |
+|---|---|
+| Synthetic SOPs, manuals, past incidents | `knowledge/` |
+| Knowledge tools and `KnowledgeBase` interface | `tools/knowledge_tools.py` |
+| Read-only Markdown access (`read_text`, `list_files`) | `data_adapter.py` |
+| `query` argument type, per-run `CallBudget` | `tools/gateway.py` |
+| Reference lookup from an agent's own findings | `agents/evidence.py` (`gather_references`) |
+| `Evidence.observed_at`; `references` on diagnoses and RCA; `RCAResult.timeline` | `models/diagnosis.py` |
+| Temporal correlation | `agents/coordinator.py` |
+| Run-level invariant checks | `safety/guards.py` |
+
+### Temporal correlation
+
+When an observation in the saved data has a timestamp, the agent records it as `observed_at`.
+The coordinator then:
+
+- builds a timeline;
+- reports observations within ±30 minutes of the incident as concurrent, and flags those
+  more than 30 minutes before it as of uncertain relevance;
+- flags observations more than 30 minutes after the incident: they can't have caused it and
+  may not reflect conditions at the time of failure;
+- halves the confidence of a hypothesis when all of its tool evidence comes from after the
+  window.
+
+If the incident has no timestamp, no temporal claims are made.

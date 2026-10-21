@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-from hpc_agent.agents.evidence import dedupe, incident_evidence, tool_evidence
+from hpc_agent.agents.evidence import dedupe, gather_references, incident_evidence, timestamp, tool_evidence
 from hpc_agent.models import AgentDiagnosis, Domain, Evidence, HypothesisStatus, Incident, ProbableCause
 from hpc_agent.tools.gateway import ScopedGateway, ToolStatus
 
@@ -64,10 +64,11 @@ class SchedulerAgent:
             job_id = data.get("job_id") if isinstance(data.get("job_id"), str) else "job"
             if job_id != "job":
                 components.append(f"job:{job_id}")
+            ended = timestamp(data.get("end_time"))
             state = data.get("state")
             state_ev: list[Evidence] = []
             if isinstance(state, str):
-                state_ev = [tool_evidence(job, f"{job_id} state={state}")]
+                state_ev = [tool_evidence(job, f"{job_id} state={state}", ended)]
                 evidence += state_ev
                 summary.append(f"{job_id} {state}")
             else:
@@ -75,7 +76,7 @@ class SchedulerAgent:
 
             exit_code = data.get("exit_code")
             if isinstance(exit_code, int) and not isinstance(exit_code, bool):
-                exit_ev = tool_evidence(job, f"{job_id} exit_code={exit_code}")
+                exit_ev = tool_evidence(job, f"{job_id} exit_code={exit_code}", ended)
                 evidence.append(exit_ev)
                 summary.append(f"exit code {exit_code}")
                 if exit_code > 128:
@@ -139,7 +140,11 @@ class SchedulerAgent:
                 if not isinstance(state, str) or not relevant:
                     continue
                 has_reason = isinstance(reason, str) and bool(reason)
-                node_ev = tool_evidence(node, f"node {name} state={state}" + (f" reason={reason}" if has_reason else ""))
+                node_ev = tool_evidence(
+                    node,
+                    f"node {name} state={state}" + (f" reason={reason}" if has_reason else ""),
+                    timestamp(entry.get("state_changed_at")),
+                )
                 evidence.append(node_ev)
                 if state.upper() in UNHEALTHY_NODE_STATES:
                     abnormal = True
@@ -161,6 +166,10 @@ class SchedulerAgent:
             missing.append("storage, network and GPU state on the job's nodes at the failure time")
 
         open_causes = [c for c in causes if c.status is HypothesisStatus.HYPOTHESIS]
+        references, reference_checks = gather_references(
+            gateway, Domain.SCHEDULER, [c.cause for c in open_causes] or [e.statement for e in reported]
+        )
+        checks += reference_checks
         return AgentDiagnosis(
             agent=self.name,
             domain=Domain.SCHEDULER,
@@ -170,6 +179,7 @@ class SchedulerAgent:
             affected_components=dedupe(components),
             recommended_checks=dedupe(checks),
             missing_information=dedupe(missing),
+            references=references,
             confidence=max((c.confidence for c in open_causes), default=0.0),
         )
 

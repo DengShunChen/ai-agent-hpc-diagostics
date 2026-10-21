@@ -6,7 +6,7 @@
     {"index": 0, "health": "pass", "xid_events": []},
     {"index": 1, "health": "pass", "xid_events": []},
     {"index": 2, "health": "pass", "xid_events": []},
-    {"index": 3, "health": "warn", "xid_events": [{"xid": 13, "count": 1}],
+    {"index": 3, "health": "warn", "xid_events": [{"xid": 13, "count": 1, "timestamp": "2026-02-03T21:39:52Z"}],
      "temperature_c": null, "power_w": null, "ecc_dbe_volatile": null,
      "pcie_replay_count": null, "nvlink_errors": null}
   ]

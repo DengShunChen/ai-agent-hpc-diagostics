@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 
-from hpc_agent.agents.evidence import dedupe, incident_evidence, number, tool_evidence
+from hpc_agent.agents.evidence import dedupe, gather_references, incident_evidence, number, timestamp, tool_evidence
 from hpc_agent.models import (
     AgentDiagnosis,
     Domain,
@@ -56,11 +56,12 @@ class StorageAgent:
             checks.append("get_filesystem_usage()")
         else:
             name = fs_data.get("filesystem") if isinstance(fs_data.get("filesystem"), str) else "filesystem"
+            fs_time = timestamp(fs_data.get("collected_at"))
             used = number(fs_data.get("used_pct"))
             if used is None:
                 missing.append("actual filesystem utilization percentage")
             else:
-                item = tool_evidence(fs, f"{name} used_pct={used:g}")
+                item = tool_evidence(fs, f"{name} used_pct={used:g}", fs_time)
                 evidence.append(item)
                 if used >= FULL_PCT:
                     capacity.append(item)
@@ -72,14 +73,16 @@ class StorageAgent:
             if not isinstance(health, str):
                 missing.append("filesystem health status")
             else:
-                item = tool_evidence(fs, f"{name} health={health}")
+                item = tool_evidence(fs, f"{name} health={health}", fs_time)
                 evidence.append(item)
                 if health.lower() != "healthy":
                     unhealthy.append(item)
                     components.append(f"filesystem:{name}")
 
         osts = gateway.invoke("get_ost_usage", incident_id=incident.incident_id)
-        entries = osts.data.get("osts") if osts.status is ToolStatus.OK and isinstance(osts.data, dict) else None
+        ost_data = osts.data if osts.status is ToolStatus.OK and isinstance(osts.data, dict) else {}
+        entries = ost_data.get("osts")
+        ost_time = timestamp(ost_data.get("collected_at"))
         usage = [
             (e["ost"], number(e.get("used_pct")), e.get("state"))
             for e in entries or []
@@ -95,13 +98,16 @@ class StorageAgent:
                 item = tool_evidence(
                     osts,
                     f"OSTs at or above {FULL_PCT:g}% used: " + ", ".join(f"{o}={p:g}%" for o, p in full),
+                    ost_time,
                 )
                 evidence.append(item)
                 capacity.append(item)
                 full_components += [ost for ost, _ in full]
                 components += [f"ost:{ost}" for ost, _ in full]
             low, high = min(p for _, p in measured), max(p for _, p in measured)
-            item = tool_evidence(osts, f"OST utilization ranges {low:g}%-{high:g}% across {len(measured)} OSTs")
+            item = tool_evidence(
+                osts, f"OST utilization ranges {low:g}%-{high:g}% across {len(measured)} OSTs", ost_time
+            )
             evidence.append(item)
             if high - low >= IMBALANCE_SPREAD_PCT:
                 imbalance.append(item)
@@ -109,7 +115,7 @@ class StorageAgent:
                 below_full.append(item)
         for ost, _, state in usage:
             if isinstance(state, str) and state.lower() != "active":
-                item = tool_evidence(osts, f"{ost} state={state}")
+                item = tool_evidence(osts, f"{ost} state={state}", ost_time)
                 evidence.append(item)
                 unhealthy.append(item)
                 components.append(f"ost:{ost}")
@@ -184,6 +190,10 @@ class StorageAgent:
             missing.append("server-side (OSS/MDS) logs for the incident window")
 
         open_causes = [c for c in causes if c.status is HypothesisStatus.HYPOTHESIS]
+        references, reference_checks = gather_references(
+            gateway, Domain.STORAGE, [c.cause for c in open_causes] or [e.statement for e in reported]
+        )
+        checks += reference_checks
         return AgentDiagnosis(
             agent=self.name,
             domain=Domain.STORAGE,
@@ -194,6 +204,7 @@ class StorageAgent:
             recommended_checks=dedupe(checks),
             recommended_actions=actions,
             missing_information=dedupe(missing),
+            references=references,
             confidence=max((c.confidence for c in open_causes), default=0.0),
         )
 

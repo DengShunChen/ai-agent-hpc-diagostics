@@ -1,7 +1,7 @@
 {
   "_synthetic": true,
   "nodes": [
-    {"node": "sim-node-0042", "state": "DRAIN", "reason": null},
-    {"node": "sim-node-0043", "state": "ALLOCATED", "reason": null}
+    {"node": "sim-node-0042", "state": "DRAIN", "reason": null, "state_changed_at": "2026-01-15T03:10:05Z"},
+    {"node": "sim-node-0043", "state": "ALLOCATED", "reason": null, "state_changed_at": "2026-01-15T01:24:28Z"}
   ]
 }

@@ -86,3 +86,44 @@ def test_facts_deduplicated_and_traceable():
     keys = [(e.source, e.statement) for e in rca.facts]
     assert len(keys) == len(set(keys))
     assert set(keys) == {(e.source, e.statement) for e in [REPORTED, GPU_EV, NODE_EV]}
+
+
+# --- temporal correlation -------------------------------------------------------------
+from datetime import UTC, datetime, timedelta  # noqa: E402
+
+T0 = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+
+
+def timed(statement, minutes):
+    return Evidence(kind=EvidenceKind.TOOL_RESULT, source=f"tool:get_node_status:{statement}",
+                    statement=statement, observed_at=T0 + timedelta(minutes=minutes))
+
+
+def correlate_at(incident_time, *items):
+    incident = INCIDENT.model_copy(update={"timestamp": incident_time})
+    causes = [cause(f"cause {e.statement}", "scheduler", [e], 0.4) for e in items]
+    d = diag("scheduler-agent", "scheduler", list(items), causes)
+    return RCACoordinator().correlate(incident, TriageAgent().triage(incident), [d])
+
+
+def test_timeline_sorted_and_windowed():
+    rca = correlate_at(T0, timed("late", 90), timed("near", -2), timed("early", -240))
+    assert [e.statement for e in rca.timeline] == ["early", "near", "late"]
+    rel = " | ".join(rca.cross_domain_relationships)
+    assert "Within 30 min of the incident: near (2 min before)" in rel
+    assert "more than 30 min after the incident" in rel and "late (90 min after)" in rel
+    assert "more than 30 min before the incident (relevance uncertain): early (4.0 h before)" in rel
+
+
+def test_late_only_evidence_halves_confidence():
+    rca = correlate_at(T0, timed("late", 90), timed("near", -2))
+    by_cause = {c.cause: c.confidence for c in rca.probable_causes}
+    assert by_cause == {"cause near": 0.4, "cause late": 0.2}
+    assert [c.cause for c in rca.probable_causes] == ["cause near", "cause late"]
+    assert any("halved" in r and "cause late" in r for r in rca.cross_domain_relationships)
+
+
+def test_missing_incident_time_prevents_temporal_claims():
+    rca = correlate_at(None, timed("late", 90))
+    assert rca.probable_causes[0].confidence == 0.4
+    assert any("incident timestamp missing" in r for r in rca.cross_domain_relationships)

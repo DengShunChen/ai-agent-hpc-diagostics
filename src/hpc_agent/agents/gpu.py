@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from enum import StrEnum
 
-from hpc_agent.agents.evidence import dedupe, incident_evidence, number, tool_evidence
+from hpc_agent.agents.evidence import dedupe, gather_references, incident_evidence, number, timestamp, tool_evidence
 from hpc_agent.models import AgentDiagnosis, Domain, Evidence, Incident, ProbableCause, RecommendedAction
 from hpc_agent.tools.gateway import ScopedGateway, ToolStatus
 
@@ -83,7 +83,7 @@ class GpuAgent:
                 label = f"{node} GPU {index}"
                 state = gpu.get("health")
                 xids = [
-                    (int(e["xid"]), int(number(e.get("count")) or 1))
+                    (int(e["xid"]), int(number(e.get("count")) or 1), timestamp(e.get("timestamp")))
                     for e in gpu.get("xid_events") or []
                     if isinstance(e, dict) and number(e.get("xid")) is not None
                 ]
@@ -101,8 +101,8 @@ class GpuAgent:
                     summary.append(f"{label} health={state}")
 
                 by_class: dict[XidClass, list[tuple[int, Evidence]]] = {}
-                for xid, count in xids:
-                    item = tool_evidence(health, f"{label} XID {xid} count={count}")
+                for xid, count, seen in xids:
+                    item = tool_evidence(health, f"{label} XID {xid} count={count}", seen)
                     evidence.append(item)
                     summary.append(f"XID {xid}")
                     if xid in XID_TABLE:
@@ -178,6 +178,10 @@ class GpuAgent:
                 "compare driver/CUDA versions with known-good nodes",
             ]
 
+        references, reference_checks = gather_references(
+            gateway, Domain.GPU, [c.cause for c in causes] or [e.statement for e in reported]
+        )
+        checks += reference_checks
         return AgentDiagnosis(
             agent=self.name,
             domain=Domain.GPU,
@@ -188,6 +192,7 @@ class GpuAgent:
             recommended_checks=dedupe(checks),
             recommended_actions=actions,
             missing_information=dedupe(missing),
+            references=references,
             confidence=max((c.confidence for c in causes), default=0.0),
         )
 

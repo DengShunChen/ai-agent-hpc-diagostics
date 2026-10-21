@@ -7,9 +7,11 @@ Agents only restate what is there; they never fill gaps with assumed values.
 from __future__ import annotations
 
 import re
+from datetime import datetime
 
 from hpc_agent.models import Domain, Evidence, EvidenceKind, Incident
-from hpc_agent.tools.gateway import ToolResult
+from hpc_agent.tools.gateway import ScopedGateway, ToolResult
+from hpc_agent.tools.knowledge_tools import terms
 
 # Keyword signals used to relate incident text to domains. Matching is a triage aid only:
 # a keyword hit marks an item as relevant to a domain, never as proof of a fault.
@@ -55,10 +57,55 @@ def incident_evidence(incident: Incident, domain: Domain | None = None) -> list[
     return items
 
 
-def tool_evidence(result: ToolResult, statement: str) -> Evidence:
+def tool_evidence(result: ToolResult, statement: str, observed_at: datetime | None = None) -> Evidence:
     return Evidence(
-        kind=EvidenceKind.TOOL_RESULT, source=f"tool:{result.tool}:{result.source}", statement=statement
+        kind=EvidenceKind.TOOL_RESULT,
+        source=f"tool:{result.tool}:{result.source}",
+        statement=statement,
+        observed_at=observed_at,
     )
+
+
+def timestamp(value: object) -> datetime | None:
+    """A timezone-aware ISO 8601 timestamp, or None. Naive times are not guessed."""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+REFERENCE_TOOLS = (("search_sop", 2), ("search_incident_history", 2), ("search_manual", 1))
+MAX_QUERY_TERMS = 12
+
+
+def gather_references(gateway: ScopedGateway, domain: Domain, texts: list[str]) -> tuple[list[Evidence], list[str]]:
+    """Look up knowledge relevant to the agent's own findings.
+
+    Returns knowledge references and "consult SOP" checks. References are context for the
+    human reviewer; they never become evidence or change confidence.
+    """
+    query_terms = dedupe([t for text in [domain.value, *texts] for t in terms(text)])[:MAX_QUERY_TERMS]
+    if not texts or len(query_terms) < 2:
+        return [], []
+    query = " ".join(query_terms)
+    references, checks = [], []
+    for tool, limit in REFERENCE_TOOLS:
+        if tool not in gateway.allowed_tools:
+            continue
+        for hit in (gateway.invoke(tool, query=query).data or [])[:limit]:
+            references.append(
+                Evidence(
+                    kind=EvidenceKind.KNOWLEDGE,
+                    source=f"knowledge:{hit['source']}",
+                    statement=f"{hit['doc_id']} ({hit['title']}): {hit['excerpt']}",
+                )
+            )
+            if tool == "search_sop":
+                checks.append(f"consult {hit['doc_id']} '{hit['title']}' (reference only)")
+    return references, checks
 
 
 def number(value: object) -> float | None:

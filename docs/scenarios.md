@@ -59,6 +59,14 @@ You can run each scenario with `./scripts/run_dev.sh diagnose <ID>`. The tests a
 | POC-SCHEDULER-001 | scheduler | scheduler | SIGKILL and the drained allocated node are tied at confidence 0.30. The walltime limit is **ruled out**, citing the conflicting evidence. Because the node is implicated and the storage, network and GPU domains weren't examined, checks for those domains are recommended. |
 | POC-GPU-001 | gpu | gpu, scheduler | The leading hypothesis is an application or CUDA software fault (XID 13 is commonly associated with application errors), at confidence 0.35. **No hardware conclusion is made.** The five missing hardware telemetry fields are listed, and an operator-run DCGM diagnostic is recommended but not executed. |
 
+### Iteration 4 additions
+
+| Scenario | Timeline | References (context only) |
+|---|---|---|
+| POC-STORAGE-001 | none (no timestamped data) | SOP-STOR-001, SIM-HIST-0001 (a single full OST), MAN-STOR-OST-BALANCE, plus SOP-SCHED-001 from the scheduler agent. The past incident doesn't change the 0.25 hypothesis. |
+| POC-SCHEDULER-001 | The node drained 2 min before the incident time, and the job failed 20 s before it. Both are inside the 30-min window. | SOP-SCHED-001, SIM-HIST-0002 (OOM SIGKILL), SIM-HIST-0003 (ECC drain), MAN-SCHED-EXIT-CODES |
+| POC-GPU-001 | XID 13 recorded 8 s before the incident | SOP-GPU-001, SIM-HIST-0004 (an application bug with XID 13), MAN-GPU-XID |
+
 Every RCA reports "Root cause NOT confirmed; human review required". A test with synthetic
 data (`test_multi_domain_correlation_on_shared_node`) also checks that a node implicated by
 both scheduler and network data is classified as `multi-domain` and correlated.

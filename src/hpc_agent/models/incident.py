@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 INCIDENT_ID_PATTERN = r"^[A-Z0-9][A-Z0-9-]{2,63}$"
 
@@ -36,3 +36,10 @@ class Incident(BaseModel):
     alerts: list[NonEmptyStr] = Field(default_factory=list)
     logs: list[NonEmptyStr] = Field(default_factory=list)
     operator_notes: list[NonEmptyStr] = Field(default_factory=list)
+
+    @field_validator("timestamp")
+    @classmethod
+    def _timezone_aware(cls, value: datetime | None) -> datetime | None:
+        if value is not None and value.tzinfo is None:
+            raise ValueError("timestamp must include a timezone (e.g. 'Z')")
+        return value

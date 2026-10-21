@@ -117,8 +117,9 @@ def test_unknown_incident_still_produces_rca(tmp_path, scopes):
 def test_report_separates_sections(diagnose, incident_id):
     report = render_report(diagnose(incident_id))
     for header in ["ROOT CAUSE: NOT CONFIRMED", "SUMMARY", "FACTS", "HYPOTHESES (ranked, unconfirmed)",
-                   "RULED OUT", "CROSS-DOMAIN RELATIONSHIPS", "MISSING INFORMATION", "RECOMMENDED CHECKS",
-                   "RECOMMENDED ACTIONS (proposals only", "TOOLS INVOKED"]:
+                   "RULED OUT", "TIMELINE", "CROSS-DOMAIN RELATIONSHIPS", "MISSING INFORMATION",
+                   "RECOMMENDED CHECKS", "RECOMMENDED ACTIONS (proposals only",
+                   "REFERENCES (knowledge base: context only", "TOOLS INVOKED"]:
         assert header in report
 
 
@@ -126,3 +127,37 @@ def test_runs_are_deterministic(diagnose):
     a, b = diagnose("POC-GPU-001"), diagnose("POC-GPU-001")
     assert a.run_id != b.run_id
     assert a.diagnoses == b.diagnoses and a.rca == b.rca
+
+
+# --- Iteration 4: knowledge references and temporal correlation -----------------------
+def reference_ids(run):
+    return [r.source.rsplit("/", 1)[-1].removesuffix(".md") for r in run.rca.references]
+
+
+def test_storage_001_references_do_not_change_conclusion(diagnose):
+    run = diagnose("POC-STORAGE-001")
+    assert reference_ids(run)[:3] == ["SOP-STOR-001", "SIM-HIST-0001", "MAN-STOR-OST-BALANCE"]
+    assert "consult SOP-STOR-001 'Investigating job write failures on FEFS/Lustre' (reference only)" in run.rca.recommended_checks
+    # A similar past incident (single full OST) is context, not evidence: still a 0.25 hypothesis.
+    assert [c.confidence for c in run.rca.probable_causes] == [0.25]
+    assert run.rca.timeline == []
+
+
+def test_scheduler_001_timeline(diagnose):
+    run = diagnose("POC-SCHEDULER-001")
+    assert [e.statement for e in run.rca.timeline] == [
+        "node sim-node-0043 state=ALLOCATED", "node sim-node-0042 state=DRAIN",
+        "SIM-JOB-20001 state=FAILED", "SIM-JOB-20001 exit_code=137",
+    ]
+    rel = " | ".join(run.rca.cross_domain_relationships)
+    assert "node sim-node-0042 state=DRAIN (2 min before)" in rel
+    assert "SIM-JOB-20001 state=FAILED (20 s before)" in rel
+    assert "halved" not in rel
+    assert {"SOP-SCHED-001", "SIM-HIST-0002", "SIM-HIST-0003"} <= set(reference_ids(run))
+
+
+def test_gpu_001_references_point_to_software_first(diagnose):
+    run = diagnose("POC-GPU-001")
+    assert reference_ids(run) == ["SOP-GPU-001", "SIM-HIST-0004", "MAN-GPU-XID"]
+    assert "sim-gpu-node-0007 GPU 3 XID 13 count=1 (8 s before)" in " ".join(run.rca.cross_domain_relationships)
+    assert not any("hardware fault" in c.cause for c in run.rca.probable_causes)

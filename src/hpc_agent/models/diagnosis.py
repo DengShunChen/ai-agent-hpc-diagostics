@@ -7,6 +7,7 @@ blended into one unverifiable narrative.
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Literal
 
@@ -40,6 +41,23 @@ class Evidence(BaseModel):
     kind: EvidenceKind
     source: NonEmptyStr  # e.g. "POC-STORAGE-001:symptoms[0]" or "tool:get_ost_usage"
     statement: NonEmptyStr
+    observed_at: datetime | None = None  # when the observation was made, if the data says so
+
+    @model_validator(mode="after")
+    def _timezone_aware(self) -> Evidence:
+        if self.observed_at is not None and self.observed_at.tzinfo is None:
+            raise ValueError("observed_at must be timezone-aware")
+        return self
+
+
+def _no_knowledge(items: list[Evidence], field: str) -> None:
+    if any(e.kind is EvidenceKind.KNOWLEDGE for e in items):
+        raise ValueError(f"knowledge documents are references, not {field} about this incident")
+
+
+def _only_knowledge(items: list[Evidence]) -> None:
+    if any(e.kind is not EvidenceKind.KNOWLEDGE for e in items):
+        raise ValueError("references may only contain knowledge-base items")
 
 
 class RiskLevel(StrEnum):
@@ -80,6 +98,7 @@ class ProbableCause(BaseModel):
     def _confirmation_needs_tool_evidence(self) -> ProbableCause:
         if self.confidence > 0.0 and not self.supporting_evidence:
             raise ValueError("non-zero confidence requires supporting evidence")
+        _no_knowledge(self.supporting_evidence + self.conflicting_evidence, "evidence")
         if self.status is HypothesisStatus.RULED_OUT and not self.conflicting_evidence:
             raise ValueError("a ruled-out cause must cite the conflicting evidence")
         if self.status is HypothesisStatus.CONFIRMED:
@@ -104,11 +123,15 @@ class AgentDiagnosis(BaseModel):
     recommended_checks: list[NonEmptyStr] = Field(default_factory=list)
     recommended_actions: list[RecommendedAction] = Field(default_factory=list)
     missing_information: list[NonEmptyStr] = Field(default_factory=list)
+    # Knowledge-base material (SOPs, manuals, past incidents): context, never evidence.
+    references: list[Evidence] = Field(default_factory=list)
     confidence: Confidence = 0.0
     human_approval_required: Literal[True] = True
 
     @model_validator(mode="after")
     def _claims_need_evidence(self) -> AgentDiagnosis:
+        _no_knowledge(self.evidence, "evidence")
+        _only_knowledge(self.references)
         if self.finding.strip() and not self.evidence:
             raise ValueError("a finding requires at least one supporting evidence item")
         if self.confidence > 0.0 and not self.evidence:
@@ -141,11 +164,16 @@ class RCAResult(BaseModel):
     recommended_checks: list[NonEmptyStr] = Field(default_factory=list)
     recommended_actions: list[RecommendedAction] = Field(default_factory=list)
     cross_domain_relationships: list[NonEmptyStr] = Field(default_factory=list)
+    # Timestamped observations in time order, for human review.
+    timeline: list[Evidence] = Field(default_factory=list)
+    references: list[Evidence] = Field(default_factory=list)
     confidence: Confidence = 0.0
     human_approval_required: Literal[True] = True
 
     @model_validator(mode="after")
     def _consistency(self) -> RCAResult:
+        _no_knowledge(self.facts + self.supporting_evidence + self.conflicting_evidence, "facts")
+        _only_knowledge(self.references)
         if self.confidence > 0.0 and not (self.facts or self.supporting_evidence):
             raise ValueError("non-zero confidence requires facts or supporting evidence")
         confirmed = [c for c in self.probable_causes if c.status is HypothesisStatus.CONFIRMED]

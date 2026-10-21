@@ -8,6 +8,7 @@ evidence. It adds no facts of its own; every fact comes from the incident or a t
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
+from datetime import timedelta
 
 from hpc_agent.agents.evidence import dedupe
 from hpc_agent.models import (
@@ -17,9 +18,15 @@ from hpc_agent.models import (
     EvidenceKind,
     HypothesisStatus,
     Incident,
+    ProbableCause,
     RCAResult,
     TriageResult,
 )
+
+# Observations this close to the incident time are treated as concurrent with it.
+CORRELATION_WINDOW = timedelta(minutes=30)
+# Applied to a hypothesis whose tool evidence was all observed after the window closed.
+LATE_EVIDENCE_FACTOR = 0.5
 
 # Checks suggested for a node implicated in one domain when another domain was not examined.
 _NODE_CHECKS = {
@@ -27,6 +34,23 @@ _NODE_CHECKS = {
     Domain.NETWORK: "get_network_status()",
     Domain.GPU: "get_gpu_health()",
 }
+
+
+def _offset(delta: timedelta) -> str:
+    seconds = int(abs(delta.total_seconds()))
+    side = "before" if delta.total_seconds() < 0 else "after"
+    if seconds < 90:
+        return f"{seconds} s {side}"
+    if seconds < 7200:
+        return f"{round(seconds / 60)} min {side}"
+    return f"{seconds / 3600:.1f} h {side}"
+
+
+def _first_per_source(items: Iterable[Evidence]) -> list[Evidence]:
+    first: dict[str, Evidence] = {}
+    for item in items:
+        first.setdefault(item.source, item)
+    return list(first.values())
 
 
 def _unique(items: Iterable[Evidence]) -> list[Evidence]:
@@ -44,6 +68,10 @@ class RCACoordinator:
         unavailable_agents: Sequence[str] = (),
     ) -> RCAResult:
         causes = [c for d in diagnoses for c in d.possible_causes]
+        facts = _unique([*triage.available_evidence, *(e for d in diagnoses for e in d.evidence)])
+        timeline = sorted((e for e in facts if e.observed_at is not None), key=lambda e: e.observed_at)
+        temporal, adjusted = self._temporal(incident, timeline, causes)
+        causes = [adjusted.get(id(c), c) for c in causes]
         # Stable sort: equal confidence keeps triage/agent order.
         open_causes = sorted(
             (c for c in causes if c.status is HypothesisStatus.HYPOTHESIS), key=lambda c: -c.confidence
@@ -69,16 +97,57 @@ class RCACoordinator:
             classification=classification,
             affected_domains=affected,
             summary=self._summary(classification, open_causes, len(ruled_out), len(missing)),
-            facts=_unique([*triage.available_evidence, *(e for d in diagnoses for e in d.evidence)]),
+            facts=facts,
             probable_causes=[*open_causes, *ruled_out],
             supporting_evidence=_unique(e for c in open_causes for e in c.supporting_evidence),
             conflicting_evidence=_unique(e for c in causes for e in c.conflicting_evidence),
             missing_information=missing,
             recommended_checks=checks,
             recommended_actions=[a for d in diagnoses for a in d.recommended_actions],
-            cross_domain_relationships=self._relationships(diagnoses),
+            cross_domain_relationships=self._relationships(diagnoses) + temporal,
+            timeline=timeline,
+            references=_first_per_source(r for d in diagnoses for r in d.references),
             confidence=open_causes[0].confidence if open_causes else 0.0,
         )
+
+    @staticmethod
+    def _temporal(
+        incident: Incident, timeline: list[Evidence], causes: list[ProbableCause]
+    ) -> tuple[list[str], dict[int, ProbableCause]]:
+        """Relate timestamped observations to the incident time; down-weight late-only support."""
+        if not timeline:
+            return [], {}
+        if incident.timestamp is None:
+            return [f"{len(timeline)} timestamped observation(s) cannot be related to the incident: "
+                    "incident timestamp missing"], {}
+        start, window = incident.timestamp, CORRELATION_WINDOW
+        within = [e for e in timeline if abs(e.observed_at - start) <= window]
+        after = [e for e in timeline if e.observed_at - start > window]
+        before = [e for e in timeline if start - e.observed_at > window]
+        minutes = int(window.total_seconds() // 60)
+        notes = []
+        if within:
+            notes.append(f"Within {minutes} min of the incident: "
+                         + "; ".join(f"{e.statement} ({_offset(e.observed_at - start)})" for e in within))
+        if after:
+            notes.append(f"Observed more than {minutes} min after the incident, so it cannot have caused it and "
+                         "may not reflect conditions at failure time: "
+                         + "; ".join(f"{e.statement} ({_offset(e.observed_at - start)})" for e in after))
+        if before:
+            notes.append(f"Observed more than {minutes} min before the incident (relevance uncertain): "
+                         + "; ".join(f"{e.statement} ({_offset(e.observed_at - start)})" for e in before))
+
+        adjusted = {}
+        for cause in causes:
+            tool = [e for e in cause.supporting_evidence if e.kind is EvidenceKind.TOOL_RESULT]
+            if cause.status is HypothesisStatus.HYPOTHESIS and tool and all(
+                e.observed_at is not None and e.observed_at - start > window for e in tool
+            ):
+                adjusted[id(cause)] = cause.model_copy(
+                    update={"confidence": round(cause.confidence * LATE_EVIDENCE_FACTOR, 2)}
+                )
+                notes.append(f"Confidence of '{cause.cause}' halved: all of its tool evidence postdates the incident")
+        return notes, adjusted
 
     @staticmethod
     def _relationships(diagnoses: Sequence[AgentDiagnosis]) -> list[str]:

@@ -21,11 +21,15 @@ It is **not** an autonomous remediation platform.
 - Production HPC, storage, scheduler, network and GPU access is **disabled**.
 - No SSH automation, no sudo for agents, no shell tools, no automatic remediation.
 
-**Current status: Iteration 3 is complete.** All five specialist roles and the RCA Coordinator
+**Current status: Iteration 4 is complete.** All five specialist roles and the RCA Coordinator
 run end to end through a Microsoft Agent Framework workflow on synthetic data. The workflow
-produces a ranked, evidence-linked RCA that never confirms a root cause on its own. The agents
-are deterministic and evidence-grounded, and no LLM is called yet. Knowledge tools, approvals,
-audit persistence, the API and the container come in later iterations.
+produces a ranked, evidence-linked RCA with a timeline, and it never confirms a root cause on
+its own.
+
+- Agents cite SOPs, manuals and past incidents from the knowledge base as references only.
+- Every run is checked against runtime safety invariants before it is returned.
+- The agents are deterministic, and no LLM is called yet.
+- Approvals, audit persistence, the API and the container come in later iterations.
 
 ## Architecture
 
@@ -84,7 +88,7 @@ src/hpc_agent/
   api/ logging/    placeholders for later iterations
 fixtures/incidents/   synthetic POC incidents
 test_data/<domain>/<incident_id>/   saved synthetic tool outputs
-knowledge/{incidents,sop,manuals}/  knowledge base (empty in Iteration 1)
+knowledge/{incidents,sop,manuals}/  synthetic knowledge base (Markdown; reference material only)
 tests/{unit,safety,scenarios}/
 containers/Containerfile  placeholder (Iteration 6)
 docs/              architecture.md, safety.md, scenarios.md
@@ -146,8 +150,10 @@ networking.
 - The coordinator never confirms a root cause. Confirmation is left to the human reviewer
   until a confirmation rule is agreed and validated against representative incidents.
 - Cross-domain correlation is rule-based. It links findings through shared incident items
-  and shared components (node, job, OST, GPU, interface), not through timing. Timestamps are
-  not yet correlated.
+  and shared components (node, job, OST, GPU, interface), and through timestamps within a
+  fixed 30-minute window. The window is not yet tuned per site.
+- Knowledge search uses keyword scoring, not semantic search. It sits behind the
+  `KnowledgeBase` interface so a RAG backend can replace it later.
 - The XID table covers a subset of NVIDIA XID codes. Unknown codes are reported as missing
   interpretation.
 - Triage uses keyword signals, so unusual wording can be misclassified as `unknown`. That
@@ -164,7 +170,7 @@ networking.
 1. ✅ Environment, models, fixtures, safety foundation, tests
 2. ✅ Triage, Storage, Scheduler agents; Agent Framework workflow; end-to-end scenario runs
 3. ✅ Network and GPU agents, RCA Coordinator, cross-domain correlation
-4. Full Tool Gateway, knowledge tools, evidence correlation
+4. ✅ Knowledge tools, temporal evidence correlation, runtime safety guards, call budget
 5. Human-in-the-loop workflow, append-only audit logging
 6. API, optional simple UI, Containerfile, Podman deployment
 7. Evaluation, covering domain classification, root-cause accuracy, evidence quality,

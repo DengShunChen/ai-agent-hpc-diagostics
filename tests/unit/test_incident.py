@@ -42,3 +42,9 @@ def test_incident_is_immutable():
     incident = Incident(incident_id="INC-001", severity="high")
     with pytest.raises(ValidationError):
         incident.severity = "low"
+
+
+def test_naive_timestamp_rejected():
+    with pytest.raises(ValidationError, match="timezone"):
+        Incident(incident_id="INC-001", severity="high", timestamp="2026-01-15T03:12:00")
+    assert Incident(incident_id="INC-001", severity="high", timestamp="2026-01-15T03:12:00Z").timestamp.tzinfo

@@ -21,6 +21,9 @@ EXPECTED_TOOLS = (
     "get_network_status",
     "get_node_status",
     "get_ost_usage",
+    "search_incident_history",
+    "search_manual",
+    "search_sop",
 )
 
 
@@ -79,9 +82,24 @@ def test_tools_for_denied_operations_cannot_be_registered(operation):
         ToolGateway().register(_spec("harmless_name", operation=operation))
 
 
-def test_tool_with_free_form_argument_cannot_be_registered():
+@pytest.mark.parametrize("argument", ["path", "command", "host", "args"])
+def test_tool_with_undeclared_argument_type_cannot_be_registered(argument):
     with pytest.raises(ToolNotAllowedError):
-        ToolGateway().register(_spec("get_thing", parameters=frozenset({"query"})))
+        ToolGateway().register(_spec("get_thing", parameters=frozenset({argument})))
+
+
+@pytest.mark.parametrize(
+    "query",
+    ["ost; rm -rf /", "ost | cat", "$(reboot)", "`id`", "ost && true", "ost\nreboot", "../../etc/passwd",
+     "ost > out", "'quoted'", "x" * 201, "", " leading space", "-rf"],
+)
+def test_query_argument_rejects_unsafe_text(gateway, query):
+    with pytest.raises(ToolArgumentError):
+        gateway.invoke("search_sop", query=query)
+
+
+def test_query_argument_accepts_search_terms(gateway):
+    assert gateway.invoke("search_sop", query="ost capacity write-failure lustre/fefs v2.1").status in ("ok", "no_data")
 
 
 def test_duplicate_registration_rejected():
