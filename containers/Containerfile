@@ -1,0 +1,7 @@
+# Placeholder — the container is built in Iteration 6, after the native POC passes its tests.
+#
+# Planned principles (see docs/safety.md):
+#   - minimal Python base image pinned by digest, deterministic dependencies
+#   - non-root USER, no privileged mode, no host networking
+#   - no credentials or SSH keys baked into the image
+#   - knowledge/ and test_data/ mounted read-only (:ro,Z); audit-data/ the only writable volume

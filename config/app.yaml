@@ -1,0 +1,22 @@
+# Application configuration (not loaded in Iteration 1; documents intended settings).
+app:
+  name: hpc-ai-agent
+  mode: offline-poc
+
+safety:
+  production_access: false        # MUST remain false during the POC
+  autonomous_remediation: false   # approvals are recorded only, never executed
+  shell_execution: false          # no shell tool is ever exposed to agents
+  default_policy: deny
+
+data:
+  # Read-only data roots, relative to the project root (or HPC_AGENT_DATA_ROOT)
+  read_only_roots:
+    - fixtures
+    - test_data
+    - knowledge
+  max_file_bytes: 1000000
+
+audit:
+  directory: audit-data           # the only writable location besides app state / temp
+  append_only: true

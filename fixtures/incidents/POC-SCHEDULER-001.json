@@ -1,0 +1,21 @@
+{
+  "incident_id": "POC-SCHEDULER-001",
+  "timestamp": "2026-01-15T03:12:00Z",
+  "system": "HPC",
+  "node": "sim-node-0042",
+  "job_id": "SIM-JOB-20001",
+  "severity": "medium",
+  "symptoms": [
+    "batch job terminated before reaching its walltime",
+    "user reports no application error message in job output"
+  ],
+  "alerts": [
+    "scheduler event: node sim-node-0042 state changed to DRAIN"
+  ],
+  "logs": [
+    "job SIM-JOB-20001 ended with exit code 137"
+  ],
+  "operator_notes": [
+    "drain reason not yet checked"
+  ]
+}

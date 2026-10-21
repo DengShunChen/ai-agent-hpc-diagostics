@@ -1,0 +1,21 @@
+# Agent definitions (not loaded in Iteration 1; agents are implemented from Iteration 2).
+# Each agent may only use the Tool Gateway tools listed here.
+agents:
+  triage-agent:
+    domain: triage
+    tools: []
+  storage-agent:
+    domain: storage
+    tools: [get_filesystem_usage, get_ost_usage, get_job_status]
+  scheduler-agent:
+    domain: scheduler
+    tools: [get_job_status, get_node_status]
+  network-agent:
+    domain: network
+    tools: [get_network_status, get_node_status]
+  gpu-agent:
+    domain: gpu
+    tools: [get_gpu_health, get_node_status]
+  rca-coordinator:
+    domain: coordination
+    tools: []

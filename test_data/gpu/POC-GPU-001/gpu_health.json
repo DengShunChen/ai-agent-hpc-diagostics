@@ -1,0 +1,13 @@
+{
+  "_synthetic": true,
+  "format": "dcgm-style saved result (synthetic, not produced by a real DCGM run)",
+  "node": "sim-gpu-node-0007",
+  "gpus": [
+    {"index": 0, "health": "pass", "xid_events": []},
+    {"index": 1, "health": "pass", "xid_events": []},
+    {"index": 2, "health": "pass", "xid_events": []},
+    {"index": 3, "health": "warn", "xid_events": [{"xid": 13, "count": 1}],
+     "temperature_c": null, "power_w": null, "ecc_dbe_volatile": null,
+     "pcie_replay_count": null, "nvlink_errors": null}
+  ]
+}

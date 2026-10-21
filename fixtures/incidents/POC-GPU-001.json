@@ -1,0 +1,18 @@
+{
+  "incident_id": "POC-GPU-001",
+  "timestamp": "2026-02-03T21:40:00Z",
+  "system": "HPC",
+  "node": "sim-gpu-node-0007",
+  "job_id": "SIM-JOB-30001",
+  "severity": "high",
+  "symptoms": [
+    "distributed training job aborted with a CUDA error"
+  ],
+  "alerts": [
+    "GPU monitoring: XID event reported on sim-gpu-node-0007 GPU 3"
+  ],
+  "logs": [
+    "CUDA error: an illegal memory access was encountered"
+  ],
+  "operator_notes": []
+}

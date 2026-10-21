@@ -1,0 +1,11 @@
+{
+  "_synthetic": true,
+  "job_id": "SIM-JOB-20001",
+  "scheduler": "slurm-sim",
+  "state": "FAILED",
+  "exit_code": 137,
+  "requested_walltime": "04:00:00",
+  "elapsed": "01:47:12",
+  "allocated_nodes": ["sim-node-0042", "sim-node-0043"],
+  "termination_reason": null
+}

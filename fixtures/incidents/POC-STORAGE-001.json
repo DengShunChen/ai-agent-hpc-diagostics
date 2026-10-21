@@ -1,0 +1,15 @@
+{
+  "incident_id": "POC-STORAGE-001",
+  "timestamp": null,
+  "system": "HPC",
+  "node": null,
+  "job_id": null,
+  "severity": "high",
+  "symptoms": [
+    "job failed while writing output",
+    "filesystem utilization is high"
+  ],
+  "alerts": [],
+  "logs": [],
+  "operator_notes": []
+}
