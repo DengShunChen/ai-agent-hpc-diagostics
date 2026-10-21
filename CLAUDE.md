@@ -22,6 +22,8 @@ This repository is an HPC/AI operations diagnostic POC
 - Run tests after relevant changes: `./scripts/run_tests.sh`.
 - Do not introduce unnecessary infrastructure before it is required.
 - Do not weaken safety controls or tests to make tests pass.
+- Do not tune agents to pass the synthetic evaluation cases; report mismatches instead.
+  Never claim MTTR reduction without measurement on representative incidents.
 
 ## Host policy
 

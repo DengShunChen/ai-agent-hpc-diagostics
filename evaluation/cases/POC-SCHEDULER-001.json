@@ -1,0 +1,23 @@
+{
+  "case_id": "POC-SCHEDULER-001",
+  "description": "Scenario 02: SIGKILL with an allocated node drained; reasons not recorded.",
+  "label_source": "synthetic; labelled by the POC developer (not independent ground truth)",
+  "fixture": "POC-SCHEDULER-001",
+  "expected": {
+    "classification": [
+      "scheduler"
+    ],
+    "outcome": "supported_hypothesis",
+    "leading_categories": [
+      "scheduler.signal_termination",
+      "node.unhealthy"
+    ],
+    "forbidden_categories": [
+      "scheduler.walltime"
+    ],
+    "required_missing": [
+      "reason node sim-node-0042 entered DRAIN",
+      "job termination reason"
+    ]
+  }
+}

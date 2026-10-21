@@ -1,0 +1,51 @@
+{
+  "case_id": "EVAL-SCHED-002",
+  "description": "Job crashed with SIGSEGV on healthy nodes.",
+  "label_source": "synthetic; labelled by the POC developer (not independent ground truth)",
+  "incident": {
+    "incident_id": "EVAL-SCHED-002",
+    "severity": "medium",
+    "job_id": "SIM-JOB-50001",
+    "symptoms": [
+      "job terminated shortly after start"
+    ]
+  },
+  "test_data": {
+    "scheduler/job_status": {
+      "_synthetic": true,
+      "job_id": "SIM-JOB-50001",
+      "state": "FAILED",
+      "exit_code": 139,
+      "requested_walltime": "04:00:00",
+      "elapsed": "00:02:10",
+      "allocated_nodes": [
+        "sim-node-0201"
+      ],
+      "termination_reason": null
+    },
+    "scheduler/node_status": {
+      "_synthetic": true,
+      "nodes": [
+        {
+          "node": "sim-node-0201",
+          "state": "ALLOCATED",
+          "reason": null
+        }
+      ]
+    }
+  },
+  "expected": {
+    "classification": [
+      "scheduler"
+    ],
+    "outcome": "supported_hypothesis",
+    "leading_categories": [
+      "application.crash"
+    ],
+    "forbidden_categories": [
+      "scheduler.walltime",
+      "node.unhealthy"
+    ],
+    "required_missing": []
+  }
+}

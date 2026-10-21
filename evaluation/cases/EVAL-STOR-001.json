@@ -1,0 +1,59 @@
+{
+  "case_id": "EVAL-STOR-001",
+  "description": "Write failure; one OST measured at 97.5% while the filesystem is at 83%.",
+  "label_source": "synthetic; labelled by the POC developer (not independent ground truth)",
+  "incident": {
+    "incident_id": "EVAL-STOR-001",
+    "severity": "high",
+    "job_id": "SIM-JOB-50001",
+    "symptoms": [
+      "job failed while writing checkpoint files"
+    ]
+  },
+  "test_data": {
+    "storage/filesystem_usage": {
+      "_synthetic": true,
+      "filesystem": "simfs01",
+      "used_pct": 83,
+      "health": "healthy"
+    },
+    "storage/ost_usage": {
+      "_synthetic": true,
+      "osts": [
+        {
+          "ost": "OST0000",
+          "used_pct": 71,
+          "state": "active"
+        },
+        {
+          "ost": "OST0001",
+          "used_pct": 74,
+          "state": "active"
+        },
+        {
+          "ost": "OST0002",
+          "used_pct": 97.5,
+          "state": "active"
+        },
+        {
+          "ost": "OST0003",
+          "used_pct": 72,
+          "state": "active"
+        }
+      ]
+    }
+  },
+  "expected": {
+    "classification": [
+      "storage"
+    ],
+    "outcome": "supported_hypothesis",
+    "leading_categories": [
+      "storage.capacity"
+    ],
+    "forbidden_categories": [],
+    "required_missing": [
+      "ENOSPC"
+    ]
+  }
+}

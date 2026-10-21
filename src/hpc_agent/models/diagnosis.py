@@ -89,6 +89,8 @@ class ProbableCause(BaseModel):
 
     cause: NonEmptyStr
     domain: Domain | None = None
+    # Stable label for comparison and evaluation, e.g. "storage.capacity", "gpu.application".
+    category: str | None = Field(default=None, pattern=r"^[a-z]+(\.[a-z_]+)+$")
     status: HypothesisStatus = HypothesisStatus.HYPOTHESIS
     supporting_evidence: list[Evidence] = Field(default_factory=list)
     conflicting_evidence: list[Evidence] = Field(default_factory=list)

@@ -1,0 +1,22 @@
+{
+  "case_id": "POC-STORAGE-001",
+  "description": "Scenario 01: write failure with reported high utilization and no measurements.",
+  "label_source": "synthetic; labelled by the POC developer (not independent ground truth)",
+  "fixture": "POC-STORAGE-001",
+  "expected": {
+    "classification": [
+      "storage"
+    ],
+    "outcome": "insufficient_evidence",
+    "leading_categories": [
+      "storage.capacity"
+    ],
+    "forbidden_categories": [],
+    "required_missing": [
+      "actual filesystem utilization percentage",
+      "individual OST utilization",
+      "filesystem health status",
+      "job termination details"
+    ]
+  }
+}

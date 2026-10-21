@@ -1,0 +1,24 @@
+{
+  "case_id": "EVAL-UNK-001",
+  "description": "Vague report with no domain-specific symptoms.",
+  "label_source": "synthetic; labelled by the POC developer (not independent ground truth)",
+  "incident": {
+    "incident_id": "EVAL-UNK-001",
+    "severity": "low",
+    "symptoms": [
+      "users report the cluster feels slow"
+    ]
+  },
+  "test_data": {},
+  "expected": {
+    "classification": [
+      "unknown"
+    ],
+    "outcome": "no_supported_hypothesis",
+    "leading_categories": [],
+    "forbidden_categories": [],
+    "required_missing": [
+      "symptoms specific enough to identify an affected domain"
+    ]
+  }
+}

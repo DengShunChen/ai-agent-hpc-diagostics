@@ -1,0 +1,44 @@
+{
+  "case_id": "EVAL-GPU-002",
+  "description": "GPU warning with high temperature and no XID events.",
+  "label_source": "synthetic; labelled by the POC developer (not independent ground truth)",
+  "incident": {
+    "incident_id": "EVAL-GPU-002",
+    "severity": "medium",
+    "node": "sim-gpu-node-0102",
+    "symptoms": [
+      "GPU throughput dropped during the run"
+    ]
+  },
+  "test_data": {
+    "gpu/gpu_health": {
+      "_synthetic": true,
+      "node": "sim-gpu-node-0102",
+      "gpus": [
+        {
+          "index": 0,
+          "health": "warn",
+          "xid_events": [],
+          "temperature_c": 93,
+          "power_w": 280,
+          "ecc_dbe_volatile": 0,
+          "pcie_replay_count": 0,
+          "nvlink_errors": 0
+        }
+      ]
+    }
+  },
+  "expected": {
+    "classification": [
+      "gpu"
+    ],
+    "outcome": "supported_hypothesis",
+    "leading_categories": [
+      "gpu.thermal"
+    ],
+    "forbidden_categories": [
+      "gpu.hardware"
+    ],
+    "required_missing": []
+  }
+}

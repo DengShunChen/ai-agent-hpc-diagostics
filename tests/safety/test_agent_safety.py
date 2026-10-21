@@ -89,6 +89,12 @@ def test_recommended_actions_have_tool_evidence(run):
 
 
 
+def test_every_cause_is_categorised(run):
+    for cause in run.rca.probable_causes:
+        assert cause.category and cause.category.split(".")[0] in {
+            "storage", "scheduler", "network", "gpu", "node", "application"}, cause.cause
+
+
 def test_rca_never_confirms_and_actions_are_evidence_backed(run):
     assert run.rca.confirmed_root_cause is None
     assert run.rca.human_approval_required is True

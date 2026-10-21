@@ -163,6 +163,14 @@ flowchart LR
     SVC --> AD[(audit-data/ rw<br/>hash-chained logs)]
 ```
 
+## Evaluation (Iteration 7)
+
+`evaluation/harness.py` runs each labelled case through the real workflow, in an isolated
+temporary data root, and scores it. `evaluation/report.py` renders `docs/evaluation.md`,
+including a comparison table across the three POC scenarios. Cause categories
+(`ProbableCause.category`, for example `storage.capacity`) give stable labels for scoring.
+Human override rates come only from recorded approval logs.
+
 ## Design notes
 
 - **Evidence traceability**: every `Evidence` has a `kind` (incident report, tool result or

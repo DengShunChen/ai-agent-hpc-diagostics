@@ -1,0 +1,38 @@
+{
+  "case_id": "EVAL-SCHED-001",
+  "description": "Job reached its walltime and received SIGTERM.",
+  "label_source": "synthetic; labelled by the POC developer (not independent ground truth)",
+  "incident": {
+    "incident_id": "EVAL-SCHED-001",
+    "severity": "low",
+    "job_id": "SIM-JOB-50001",
+    "symptoms": [
+      "batch job terminated by the scheduler"
+    ]
+  },
+  "test_data": {
+    "scheduler/job_status": {
+      "_synthetic": true,
+      "job_id": "SIM-JOB-50001",
+      "state": "FAILED",
+      "exit_code": 143,
+      "requested_walltime": "04:00:00",
+      "elapsed": "04:00:03",
+      "allocated_nodes": [
+        "sim-node-0201"
+      ],
+      "termination_reason": null
+    }
+  },
+  "expected": {
+    "classification": [
+      "scheduler"
+    ],
+    "outcome": "supported_hypothesis",
+    "leading_categories": [
+      "scheduler.walltime"
+    ],
+    "forbidden_categories": [],
+    "required_missing": []
+  }
+}

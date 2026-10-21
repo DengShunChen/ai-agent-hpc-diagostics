@@ -23,9 +23,12 @@ class NetworkAgent:
         components: list[str] = []
         causes: list[ProbableCause] = []
 
-        def hypothesis(text: str, confidence: float, support: list[Evidence]) -> None:
+        def hypothesis(category: str, text: str, confidence: float, support: list[Evidence]) -> None:
             causes.append(
-                ProbableCause(cause=text, domain=Domain.NETWORK, supporting_evidence=support, confidence=confidence)
+                ProbableCause(
+                    cause=text, domain=Domain.NETWORK, category=category,
+                    supporting_evidence=support, confidence=confidence,
+                )
             )
 
         status = gateway.invoke("get_network_status", incident_id=incident.incident_id)
@@ -55,6 +58,7 @@ class NetworkAgent:
                     if state.lower() != "up":
                         implicated = True
                         hypothesis(
+                            "network.link_down",
                             f"Interface {label} is {state}; loss of connectivity on {node} may have disrupted "
                             "jobs, storage access or inter-node traffic",
                             0.5,
@@ -72,6 +76,7 @@ class NetworkAgent:
                     item = tool_evidence(status, f"{label} members not up: {', '.join(down_members)}")
                     evidence.append(item)
                     hypothesis(
+                        "network.bond_degraded",
                         f"Bond {label} is degraded ({', '.join(down_members)} not up); redundancy is reduced, "
                         "which alone does not indicate an outage",
                         0.2,
@@ -86,6 +91,7 @@ class NetworkAgent:
                     item = tool_evidence(status, f"{label} rx_errors={rx:g} tx_errors={tx:g}")
                     evidence.append(item)
                     hypothesis(
+                        "network.packet_errors",
                         f"Interface {label} reports packet errors; possible cabling, optics or switch-port problem",
                         0.3,
                         [item],
@@ -99,7 +105,8 @@ class NetworkAgent:
                     implicated = True
                     item = tool_evidence(status, f"{label} link_flaps={flaps:g}", changed)
                     evidence.append(item)
-                    hypothesis(f"Link {label} flapped; intermittent connectivity is possible", 0.35, [item])
+                    hypothesis("network.link_flap", f"Link {label} flapped; intermittent connectivity is possible",
+                               0.35, [item])
 
                 if implicated:
                     components += [f"node:{node}", f"interface:{label}"]

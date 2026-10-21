@@ -1,0 +1,52 @@
+{
+  "case_id": "EVAL-STOR-002",
+  "description": "Reported high utilization, but filesystem and OSTs are measured well below full.",
+  "label_source": "synthetic; labelled by the POC developer (not independent ground truth)",
+  "incident": {
+    "incident_id": "EVAL-STOR-002",
+    "severity": "medium",
+    "symptoms": [
+      "job failed while writing output",
+      "filesystem utilization is high"
+    ]
+  },
+  "test_data": {
+    "storage/filesystem_usage": {
+      "_synthetic": true,
+      "filesystem": "simfs01",
+      "used_pct": 58,
+      "health": "healthy"
+    },
+    "storage/ost_usage": {
+      "_synthetic": true,
+      "osts": [
+        {
+          "ost": "OST0000",
+          "used_pct": 55,
+          "state": "active"
+        },
+        {
+          "ost": "OST0001",
+          "used_pct": 57,
+          "state": "active"
+        },
+        {
+          "ost": "OST0002",
+          "used_pct": 61,
+          "state": "active"
+        }
+      ]
+    }
+  },
+  "expected": {
+    "classification": [
+      "storage"
+    ],
+    "outcome": "no_supported_hypothesis",
+    "leading_categories": [],
+    "forbidden_categories": [
+      "storage.capacity"
+    ],
+    "required_missing": []
+  }
+}

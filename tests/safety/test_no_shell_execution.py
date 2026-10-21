@@ -37,3 +37,13 @@ def test_no_forbidden_tool_functions_defined():
         re.MULTILINE,
     )
     assert not any(pattern.search(p.read_text(encoding="utf-8")) for p in SOURCES)
+
+
+def test_shell_scripts_are_syntactically_valid_and_never_use_sudo():
+    import subprocess  # test-only: checks the repository's own helper scripts
+
+    for script in sorted((PROJECT_ROOT / "scripts").glob("*.sh")):
+        assert subprocess.run(["bash", "-n", str(script)], capture_output=True).returncode == 0, script.name
+        text = script.read_text()
+        assert not re.search(r"\bsudo\b|\bdnf\b|\bsystemctl\b|firewall-cmd|setenforce|--privileged|--network[= ]host",
+                             text), script.name

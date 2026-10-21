@@ -12,6 +12,7 @@
     hpc-agent verify-audit                            verify both hash chains
     hpc-agent serve [--host 127.0.0.1] [--port 8080]  HTTP API + review page
     hpc-agent create-operator-token NAME --tokens-file PATH   prints a new token once
+    hpc-agent evaluate [--output docs/evaluation.md] [--approvals-log PATH]   score labelled cases
 
 Decisions are recorded only; nothing is ever executed. On the CLI, --operator is an asserted
 identity; the HTTP API instead derives the operator from an authenticated bearer token.
@@ -55,6 +56,12 @@ def _parser() -> argparse.ArgumentParser:
     token = sub.add_parser("create-operator-token", help="create or rotate an operator's API token")
     token.add_argument("operator")
     token.add_argument("--tokens-file", required=True, type=Path)
+    evaluate = sub.add_parser("evaluate", help="run the labelled evaluation cases")
+    evaluate.add_argument("--cases", type=Path, default=None, help="default: evaluation/cases")
+    evaluate.add_argument("--approvals-log", type=Path, default=None,
+                          help="approvals.jsonl with real human decisions (for the override rate)")
+    evaluate.add_argument("--output", type=Path, default=None, help="write the Markdown report here")
+    evaluate.add_argument("--json", type=Path, default=None, help="write per-case results as JSON here")
     return parser
 
 
@@ -70,9 +77,27 @@ def main(argv: list[str] | None = None) -> int:
         print("registered tools:", ", ".join(gateway.registered_tools()))
         return 0
 
+    from hpc_agent.logging.audit_logger import AuditIntegrityError
     from hpc_agent.safety.operators import OperatorAuthError, OperatorTokens, issue_token
     from hpc_agent.workflows.approval_workflow import ApprovalService, default_state_dir, render_review
     from hpc_agent.workflows.diagnostic_workflow import render_report, run_diagnosis
+
+    if args.command == "evaluate":
+        import json
+
+        from hpc_agent.evaluation.harness import evaluate as run_evaluation
+        from hpc_agent.evaluation.report import render_markdown
+
+        results, summary = run_evaluation(args.cases or adapter.root / "evaluation" / "cases",
+                                          approvals_log=args.approvals_log)
+        report = render_markdown(results, summary)
+        if args.output:
+            args.output.write_text(report, encoding="utf-8")
+        if args.json:
+            args.json.write_text(json.dumps({"summary": summary.model_dump(),
+                                             "cases": [r.model_dump() for r in results]}, indent=2))
+        print(report)
+        return 0
 
     if args.command == "create-operator-token":
         try:
@@ -127,7 +152,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "verify-audit":
             print(f"audit.jsonl: {service.audit.verify()} records, chain OK")
             print(f"approvals.jsonl: {service.approvals.verify()} records, chain OK")
-    except (KeyError, ValueError, PermissionError) as error:
+    except (KeyError, ValueError, PermissionError, AuditIntegrityError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
     return 0

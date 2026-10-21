@@ -47,9 +47,12 @@ class SchedulerAgent:
         components: list[str] = []
         summary: list[str] = []
 
-        def hypothesis(text: str, confidence: float, support: list[Evidence]) -> None:
+        def hypothesis(category: str, text: str, confidence: float, support: list[Evidence]) -> None:
             causes.append(
-                ProbableCause(cause=text, domain=Domain.SCHEDULER, supporting_evidence=support, confidence=confidence)
+                ProbableCause(
+                    cause=text, domain=Domain.SCHEDULER, category=category,
+                    supporting_evidence=support, confidence=confidence,
+                )
             )
 
         abnormal = False
@@ -81,11 +84,13 @@ class SchedulerAgent:
                 summary.append(f"exit code {exit_code}")
                 if exit_code > 128:
                     signal = exit_code - 128
-                    hypothesis(_SIGNAL_CAUSES.get(signal, f"Job terminated by signal {signal}"), 0.3,
+                    category = "application.crash" if signal in (6, 7, 11) else "scheduler.signal_termination"
+                    hypothesis(category, _SIGNAL_CAUSES.get(signal, f"Job terminated by signal {signal}"), 0.3,
                                state_ev + [exit_ev])
                     abnormal = True
                 elif exit_code > 0:
                     hypothesis(
+                        "application.exit_code",
                         f"Application exited with code {exit_code}; the application's own error output "
                         "should be checked before suspecting the scheduler",
                         0.3,
@@ -102,7 +107,7 @@ class SchedulerAgent:
             elif el_s >= req_s:
                 item = tool_evidence(job, f"elapsed {elapsed} reached requested walltime {requested}")
                 evidence.append(item)
-                hypothesis("Job reached its walltime limit", 0.5, state_ev + [item])
+                hypothesis("scheduler.walltime", "Job reached its walltime limit", 0.5, state_ev + [item])
             else:
                 item = tool_evidence(job, f"elapsed {elapsed} is below requested walltime {requested}; "
                                           "walltime limit was not reached")
@@ -111,6 +116,7 @@ class SchedulerAgent:
                     ProbableCause(
                         cause="Job reached its walltime limit",
                         domain=Domain.SCHEDULER,
+                        category="scheduler.walltime",
                         status=HypothesisStatus.RULED_OUT,
                         supporting_evidence=state_ev,
                         conflicting_evidence=[item],
@@ -153,6 +159,7 @@ class SchedulerAgent:
                     if not has_reason:
                         missing.append(f"reason node {name} entered {state}")
                     hypothesis(
+                        "node.unhealthy",
                         f"Node {name} entered {state}; a node problem may have terminated the job. The node "
                         "state alone does not show whether the cause is hardware, GPU, network, storage or an "
                         "administrator action",

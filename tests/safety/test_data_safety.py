@@ -79,7 +79,7 @@ def test_symlink_escape_rejected(tmp_path):
 
 
 def _repo_data_files():
-    for d in ("fixtures", "test_data", "knowledge"):
+    for d in ("fixtures", "test_data", "knowledge", "evaluation"):
         yield from (p for p in (PROJECT_ROOT / d).rglob("*") if p.is_file() and p.name != ".gitkeep")
 
 

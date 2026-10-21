@@ -63,9 +63,12 @@ class GpuAgent:
         summary: list[str] = []
         telemetry_gaps = False
 
-        def hypothesis(text: str, confidence: float, support: list[Evidence]) -> None:
+        def hypothesis(category: str, text: str, confidence: float, support: list[Evidence]) -> None:
             causes.append(
-                ProbableCause(cause=text, domain=Domain.GPU, supporting_evidence=support, confidence=confidence)
+                ProbableCause(
+                    cause=text, domain=Domain.GPU, category=category,
+                    supporting_evidence=support, confidence=confidence,
+                )
             )
 
         health = gateway.invoke("get_gpu_health", incident_id=incident.incident_id)
@@ -120,11 +123,13 @@ class GpuAgent:
                     item = tool_evidence(health, f"{label} {field}={value:g}")
                     evidence.append(item)
                     if field == "temperature_c" and value >= THERMAL_LIMIT_C:
-                        hypothesis(f"Thermal condition on {label} may have contributed to the error", 0.4, [item])
+                        hypothesis("gpu.thermal", f"Thermal condition on {label} may have contributed to the error",
+                                   0.4, [item])
                     elif field == "ecc_dbe_volatile" and value > 0:
                         hw_support.append(item)
                     elif field in ("pcie_replay_count", "nvlink_errors") and value > 0:
                         hypothesis(
+                            "gpu.interconnect",
                             f"{description.capitalize()}s are non-zero on {label}; interconnect errors may have "
                             "contributed (significance depends on the site baseline)",
                             0.25,
@@ -138,6 +143,7 @@ class GpuAgent:
                 if app := by_class.get(XidClass.APPLICATION):
                     codes = ", ".join(f"XID {x} ({XID_TABLE[x][0]})" for x, _ in app)
                     hypothesis(
+                        "gpu.application",
                         f"Application or CUDA software-environment fault on {label}: {codes} is commonly "
                         "associated with application errors rather than GPU hardware",
                         0.35,
@@ -147,6 +153,7 @@ class GpuAgent:
                     hw_support += [e for _, e in hw]
                 if hw_support:
                     hypothesis(
+                        "gpu.hardware",
                         f"GPU hardware fault on {label} is indicated by saved data; operator-run diagnostics are "
                         "needed before any hardware conclusion",
                         0.5,
@@ -164,7 +171,8 @@ class GpuAgent:
                 if follow := by_class.get(XidClass.FOLLOW_ON):
                     missing.append(f"events preceding {', '.join(f'XID {x}' for x, _ in follow)} on {label}")
                 if len(causes) == causes_before and state_ev:
-                    hypothesis(f"GPU health check reports a problem on {label} without a recorded cause", 0.2, state_ev)
+                    hypothesis("gpu.unexplained",
+                               f"GPU health check reports a problem on {label} without a recorded cause", 0.2, state_ev)
                 checks.append(f"request an operator-run DCGM diagnostic on {node} (not executed by this platform)")
 
         if cuda_reports or any(c.cause.startswith("Application or CUDA") for c in causes):

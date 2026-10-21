@@ -67,6 +67,10 @@ You can run each scenario with `./scripts/run_dev.sh diagnose <ID>`. The tests a
 | POC-SCHEDULER-001 | The node drained 2 min before the incident time, and the job failed 20 s before it. Both are inside the 30-min window. | SOP-SCHED-001, SIM-HIST-0002 (OOM SIGKILL), SIM-HIST-0003 (ECC drain), MAN-SCHED-EXIT-CODES |
 | POC-GPU-001 | XID 13 recorded 8 s before the incident | SOP-GPU-001, SIM-HIST-0004 (an application bug with XID 13), MAN-GPU-XID |
 
+Evaluation cases for all three scenarios, plus 10 variants with labelled ground truth, are in
+`evaluation/cases/`. Results and a side-by-side comparison are in
+[evaluation.md](evaluation.md).
+
 Every RCA reports "Root cause NOT confirmed; human review required". A test with synthetic
 data (`test_multi_domain_correlation_on_shared_node`) also checks that a node implicated by
 both scheduler and network data is classified as `multi-domain` and correlated.

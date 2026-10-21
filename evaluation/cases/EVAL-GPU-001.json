@@ -1,0 +1,47 @@
+{
+  "case_id": "EVAL-GPU-001",
+  "description": "GPU fell off the bus (XID 79) with clean thermal/power telemetry.",
+  "label_source": "synthetic; labelled by the POC developer (not independent ground truth)",
+  "incident": {
+    "incident_id": "EVAL-GPU-001",
+    "severity": "critical",
+    "node": "sim-gpu-node-0101",
+    "symptoms": [
+      "GPU disappeared from the node during training"
+    ]
+  },
+  "test_data": {
+    "gpu/gpu_health": {
+      "_synthetic": true,
+      "node": "sim-gpu-node-0101",
+      "gpus": [
+        {
+          "index": 1,
+          "health": "fail",
+          "xid_events": [
+            {
+              "xid": 79,
+              "count": 1
+            }
+          ],
+          "temperature_c": 64,
+          "power_w": 280,
+          "ecc_dbe_volatile": 0,
+          "pcie_replay_count": 0,
+          "nvlink_errors": 0
+        }
+      ]
+    }
+  },
+  "expected": {
+    "classification": [
+      "gpu"
+    ],
+    "outcome": "supported_hypothesis",
+    "leading_categories": [
+      "gpu.hardware"
+    ],
+    "forbidden_categories": [],
+    "required_missing": []
+  }
+}

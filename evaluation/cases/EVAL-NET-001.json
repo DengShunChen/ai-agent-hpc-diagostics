@@ -1,0 +1,58 @@
+{
+  "case_id": "EVAL-NET-001",
+  "description": "MPI job lost peers; the node's bond is down.",
+  "label_source": "synthetic; labelled by the POC developer (not independent ground truth)",
+  "incident": {
+    "incident_id": "EVAL-NET-001",
+    "severity": "high",
+    "node": "sim-node-0201",
+    "job_id": "SIM-JOB-50001",
+    "symptoms": [
+      "MPI job lost connection to peers"
+    ],
+    "alerts": [
+      "network link down alert on sim-node-0201"
+    ]
+  },
+  "test_data": {
+    "scheduler/job_status": {
+      "_synthetic": true,
+      "job_id": "SIM-JOB-50001",
+      "state": "FAILED",
+      "exit_code": 143,
+      "requested_walltime": "04:00:00",
+      "elapsed": "01:00:00",
+      "allocated_nodes": [
+        "sim-node-0201"
+      ],
+      "termination_reason": null
+    },
+    "network/network_status": {
+      "_synthetic": true,
+      "interfaces": [
+        {
+          "node": "sim-node-0201",
+          "interface": "bond0",
+          "state": "down",
+          "rx_errors": 0,
+          "tx_errors": 0,
+          "link_flaps": 0
+        }
+      ]
+    }
+  },
+  "expected": {
+    "classification": [
+      "multi-domain",
+      "network"
+    ],
+    "outcome": "supported_hypothesis",
+    "leading_categories": [
+      "network.link_down"
+    ],
+    "forbidden_categories": [],
+    "required_missing": [
+      "switch-side port status"
+    ]
+  }
+}

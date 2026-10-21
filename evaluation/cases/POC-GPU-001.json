@@ -1,0 +1,21 @@
+{
+  "case_id": "POC-GPU-001",
+  "description": "Scenario 03: CUDA illegal memory access with XID 13; hardware telemetry missing.",
+  "label_source": "synthetic; labelled by the POC developer (not independent ground truth)",
+  "fixture": "POC-GPU-001",
+  "expected": {
+    "classification": [
+      "gpu"
+    ],
+    "outcome": "supported_hypothesis",
+    "leading_categories": [
+      "gpu.application"
+    ],
+    "forbidden_categories": [
+      "gpu.hardware"
+    ],
+    "required_missing": [
+      "driver and CUDA versions"
+    ]
+  }
+}

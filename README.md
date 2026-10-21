@@ -21,7 +21,7 @@ It is **not** an autonomous remediation platform.
 - Production HPC, storage, scheduler, network and GPU access is **disabled**.
 - No SSH automation, no sudo for agents, no shell tools, no automatic remediation.
 
-**Current status: Iteration 6 is complete.** All five specialist roles and the RCA Coordinator
+**Current status: all seven POC iterations are complete.** All five specialist roles and the RCA Coordinator
 run end to end through a Microsoft Agent Framework workflow on synthetic data. The workflow
 produces a ranked, evidence-linked RCA with a timeline, and it never confirms a root cause on
 its own.
@@ -35,6 +35,9 @@ its own.
   authenticate with bearer tokens, and only token hashes are stored.
 - The app ships as one rootless, non-root Podman container with a read-only root filesystem
   and read-only data volumes; `audit-data/` is its only writable volume.
+- An evaluation harness scores the system on 13 labelled synthetic cases; see
+  [docs/evaluation.md](docs/evaluation.md). A scripted demo is in [docs/demo.md](docs/demo.md).
+  **No MTTR reduction is claimed.**
 
 ## Architecture
 
@@ -74,29 +77,44 @@ See [docs/safety.md](docs/safety.md).
 
 ## Workflow and approval states
 
-`DRAFT → DIAGNOSIS_COMPLETE → AWAITING_HUMAN_APPROVAL → APPROVED → CLOSED`
-plus `REJECTED` and `REVISION_REQUESTED`, which both lead to `REVISE` and then back to `DRAFT`.
+1. An incident from `fixtures/` is diagnosed. The CLI, the API or the review page can start
+   this.
+2. **Triage** classifies the incident and selects specialists.
+3. The selected **specialists** gather evidence through their scoped, read-only tools.
+4. The **RCA Coordinator** ranks the hypotheses, relates domains and builds the timeline.
+5. The **runtime guard** verifies the run's invariants.
+6. The run is saved, and its approval state moves
+   `DRAFT → DIAGNOSIS_COMPLETE → AWAITING_HUMAN_APPROVAL`.
+7. A **human** decides: APPROVED (then CLOSED), REJECTED or REVISION_REQUESTED. Rejection and
+   revision requests lead to REVISE, and the incident is re-diagnosed as a new run.
+8. Each step is written to the hash-chained audit trail. **Nothing is ever executed.**
 
 ## Repository structure
 
 ```
-config/            agents.yaml, app.yaml (documented settings; not loaded yet)
+config/            agents.yaml (per-agent tool scopes), app.yaml (documented settings)
 src/hpc_agent/
-  models/          Incident, AgentDiagnosis, RCAResult, AuditRecord, ApprovalRecord,
+  models/          Incident, AgentDiagnosis, RCAResult, AuditRecord, ApprovalRecord, ApprovalRequest,
                    TriageResult, DiagnosticRun
-  agents/          triage.py, storage.py, scheduler.py, evidence.py (network/gpu/coordinator: placeholders)
-  workflows/       diagnostic_workflow.py (Agent Framework orchestration + report)
-  safety/          policy.py (default deny), approval.py (state machine), secrets.py
-  tools/           gateway.py (allowlist, per-agent ScopedGateway) + per-domain read-only tools
-  config.py        loads per-agent tool scopes from config/agents.yaml
-  data_adapter.py  read-only access to fixtures/, test_data/, knowledge/
-  api/ logging/    placeholders for later iterations
-fixtures/incidents/   synthetic POC incidents
+  agents/          triage, storage, scheduler, network, gpu, coordinator (RCA), evidence helpers
+  workflows/       diagnostic_workflow.py (Agent Framework orchestration, report),
+                   approval_workflow.py (human-in-the-loop service, run store, review)
+  tools/           gateway.py (allowlist, ScopedGateway, call budget), per-domain tools, knowledge_tools.py
+  safety/          policy (default deny), approval (state machine), guards (run invariants),
+                   operators (API token auth), secrets (credential scanner)
+  logging/         audit_logger.py (hash-chained append-only JSONL)
+  api/             routes.py (FastAPI) + static/ (review page)
+  evaluation/      harness.py (metrics), report.py (Markdown report, scenario comparison)
+  config.py, data_adapter.py, main.py (CLI)
+fixtures/incidents/                 synthetic POC incidents
 test_data/<domain>/<incident_id>/   saved synthetic tool outputs
-knowledge/{incidents,sop,manuals}/  synthetic knowledge base (Markdown; reference material only)
+knowledge/{incidents,sop,manuals}/  synthetic knowledge base (reference material only)
+evaluation/cases/                   labelled synthetic evaluation cases
 tests/{unit,safety,scenarios}/
-containers/Containerfile  placeholder (Iteration 6)
-docs/              architecture.md, safety.md, scenarios.md
+containers/        Containerfile, requirements.lock (hash-locked)
+scripts/           run_tests, run_dev, run_api, demo, lock_requirements, podman_run, container_smoke_test
+docs/              architecture, safety, scenarios, evaluation (generated), demo
+audit-data/        runtime state and audit logs (git-ignored)
 ```
 
 ## Requirements
@@ -142,6 +160,36 @@ information, checks and proposed actions in separate sections:
 
 Running `./scripts/run_dev.sh` with no arguments validates every fixture and lists the
 allowlisted tools. See [docs/scenarios.md](docs/scenarios.md).
+
+## Evaluation
+
+```bash
+PYTHONPATH=src .venv/bin/python -m hpc_agent.main evaluate --output docs/evaluation.md
+```
+
+This runs every case in `evaluation/cases/` through the full workflow and reports the
+metrics from spec §21:
+
+- domain classification;
+- root-cause accuracy (top-1 and top-3);
+- outcome and refusal correctness;
+- evidence quality;
+- unsupported-claim rate;
+- human override rate, only when you pass `--approvals-log` with real decisions;
+- processing time.
+
+The cases are synthetic and were labelled by the developer, so the numbers show designed
+behavior, not field accuracy. **MTTR is not measured or claimed.**
+
+## Demo
+
+```bash
+./scripts/demo.sh
+```
+
+The demo walks through all three scenarios, the refused AI approval, the revision cycle,
+tamper detection and the evaluation summary. Add `DEMO_PAUSE=1` to pause between steps. The
+presenter notes are in [docs/demo.md](docs/demo.md).
 
 ## Human approval
 
@@ -269,6 +317,11 @@ Container properties:
   binary. Nothing exposes it, but a slimmer base would remove it.
 - With `--userns=keep-id`, the first start on a new image copies and re-owns its layers.
   That took about 10 minutes on this busy host; later starts take about 1 second.
+- Triage classification is keyword-based. In the evaluation, two single-symptom storage cases
+  ("job failed while writing…") tied with the scheduler and came out `multi-domain`. The
+  diagnosis itself was correct. The coordinator keeps the triage label unless tool evidence
+  spans two or more domains (see [docs/evaluation.md](docs/evaluation.md)).
+- The evaluation labels are synthetic and were written by the developer of the agents.
 - The hash chain detects edited, reordered or deleted records, but not records removed from
   the end of the file. Anchor the latest hash externally if that matters.
 - No MTTR claims are made. MTTR reduction may only be reported after measurement against
@@ -282,5 +335,15 @@ Container properties:
 4. ✅ Knowledge tools, temporal evidence correlation, runtime safety guards, call budget
 5. ✅ Human-in-the-loop approval workflow, review package, hash-chained append-only audit logging
 6. ✅ Authenticated HTTP API, minimal review page, hash-locked Containerfile, rootless Podman deployment
-7. Evaluation, covering domain classification, root-cause accuracy, evidence quality,
-   unsupported-claim rate, human override rate and processing time
+7. ✅ Evaluation harness and report, scenario comparison, demo script and guide
+
+**Beyond the POC** (each step needs separate authorization and a security review):
+
+1. Independent evaluation on representative, de-identified incidents labelled by operations
+   engineers, plus override rates from real reviews.
+2. Read-only production data adapters behind the Tool Gateway (FEFS/Lustre, PJM/Slurm, DCGM
+   exports, SNMP and monitoring), connected over a private network.
+3. An optional LLM layer that phrases findings from existing evidence, validated by the same
+   models and guards. It would get no new tools.
+4. SSO and TLS for the API, external anchoring of the audit hash, and a slimmer base image.
+5. Only after measurement: MTTR comparison against the current process.

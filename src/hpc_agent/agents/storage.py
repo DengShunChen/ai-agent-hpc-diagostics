@@ -126,16 +126,19 @@ class StorageAgent:
         causes: list[ProbableCause] = []
         actions: list[RecommendedAction] = []
 
-        def hypothesis(text: str, confidence: float, support: list[Evidence], conflicts: list[Evidence] = ()) -> None:
+        def hypothesis(
+            category: str, text: str, confidence: float, support: list[Evidence], conflicts: list[Evidence] = ()
+        ) -> None:
             causes.append(
                 ProbableCause(
-                    cause=text, domain=Domain.STORAGE, supporting_evidence=support,
+                    cause=text, domain=Domain.STORAGE, category=category, supporting_evidence=support,
                     conflicting_evidence=list(conflicts), confidence=confidence,
                 )
             )
 
         if capacity:
             hypothesis(
+                "storage.capacity",
                 "Full filesystem or OST capacity may have caused the write failure"
                 if write_reports
                 else "Filesystem or OST capacity is near full",
@@ -160,6 +163,7 @@ class StorageAgent:
                 ProbableCause(
                     cause="Storage capacity caused the write failure",
                     domain=Domain.STORAGE,
+                    category="storage.capacity",
                     status=HypothesisStatus.RULED_OUT,
                     supporting_evidence=write_reports + high_reports,
                     conflicting_evidence=below_full,
@@ -167,6 +171,7 @@ class StorageAgent:
             )
         elif write_reports and high_reports:
             hypothesis(
+                "storage.capacity",
                 "Storage capacity or OST imbalance may be contributing to the write failure",
                 0.25,
                 write_reports + high_reports,
@@ -174,15 +179,17 @@ class StorageAgent:
             )
         if imbalance:
             hypothesis(
+                "storage.ost_imbalance",
                 "OST imbalance may cause writes to fail on the fullest OSTs even while the filesystem has free space",
                 0.4 if write_reports else 0.3,
                 write_reports + imbalance,
             )
         if unhealthy:
-            hypothesis("Degraded filesystem or OST health may be causing I/O failures", 0.5, unhealthy)
+            hypothesis("storage.health", "Degraded filesystem or OST health may be causing I/O failures", 0.5, unhealthy)
             checks.append("review OSS/MDS server logs and target states for the incident window")
         if io_errors:
             hypothesis(
+                "storage.io_error",
                 "Reported I/O errors may indicate a storage server, target or client communication fault",
                 0.3,
                 io_errors,
