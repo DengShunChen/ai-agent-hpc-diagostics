@@ -54,8 +54,9 @@ below 0.3. Tests enforce all of this (`tests/unit/test_site_profile.py`).
      - never overwrites existing files and writes them with mode 0600.
    - Review the free text (symptoms, alerts, logs, notes) by hand. Only known names are
      pseudonymized; other personal or customer details can't be detected automatically.
-   - Copy `config/` and the site's `knowledge/` into the data root, then run with
-     `HPC_AGENT_DATA_ROOT=<data-root>`.
+   - Put the site's `knowledge/` into the data root, then start the container with
+     `HPC_AGENT_DATA_DIR=<data-root> HPC_AGENT_SITE=<site-id> scripts/podman_run.sh`
+     (for the CLI, copy `config/` too and set `HPC_AGENT_DATA_ROOT=<data-root>`).
 4. **Knowledge base.** Add the site's SOPs (`SOP-*`), manuals (`MAN-*`) and resolved
    incidents (`SIM-HIST-*` or the site's own IDs) as Markdown. The loader rejects
    credential-like content.
@@ -72,7 +73,9 @@ below 0.3. Tests enforce all of this (`tests/unit/test_site_profile.py`).
 7. **Operators.** Issue tokens with `create-operator-token`, store them outside the
    repository, and walk the team through `docs/demo.md`.
 8. **Measure.** Collect `hpc-agent metrics` monthly, and follow
-   [business-impact.md](business-impact.md) for the before/after comparison.
+   [business-impact.md](business-impact.md) for the before/after comparison. The
+   step-by-step pilot procedure for site engineers is in
+   [pilot-runbook.md](pilot-runbook.md) (Traditional Chinese).
 
 ## Keeping sites comparable
 

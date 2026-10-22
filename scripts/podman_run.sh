@@ -12,6 +12,12 @@
 # 127.0.0.1 only, data volumes read-only, audit-data the only writable volume.
 # The :Z option relabels the mounted host paths for SELinux (private to this container).
 #
+# Pilot data (imported with `hpc-agent import-export`, outside the repository) and site profile:
+#   HPC_AGENT_DATA_DIR=~/hpc-pilot/data HPC_AGENT_SITE=<site-id> \
+#   HPC_AGENT_STATE_DIR=~/hpc-pilot/audit-data scripts/podman_run.sh
+# The data dir must hold fixtures/, test_data/ and knowledge/. The site profile is read from
+# config/sites/ inside the image, so add it before building.
+#
 # Optional local LLM explainer (Ollama on this host, listening on 127.0.0.1:11434):
 #   MODEL_PROVIDER=ollama MODEL_NAME=qwen2.5:3b scripts/podman_run.sh
 # This adds a pasta mapping so the container can reach the host's loopback as
@@ -23,10 +29,16 @@ ROOT="$(pwd)"
 IMAGE="${HPC_AGENT_IMAGE:-localhost/hpc-ai-agent:0.1.0}"
 PORT="${HPC_AGENT_PORT:-8080}"
 STATE="${HPC_AGENT_STATE_DIR:-$ROOT/audit-data}"
+DATA="$(realpath "${HPC_AGENT_DATA_DIR:-$ROOT}")"
+SITE="${HPC_AGENT_SITE:-default}"
 TOKENS="${HPC_AGENT_OPERATOR_TOKENS:?set HPC_AGENT_OPERATOR_TOKENS to the operator token-hash file}"
 APP=/opt/app-root/app
 
 case "$(realpath "$TOKENS")" in "$ROOT"/*) echo "token file must be outside the repository" >&2; exit 2;; esac
+for d in fixtures test_data knowledge; do
+    [ -d "$DATA/$d" ] || { echo "data dir $DATA has no $d/ directory" >&2; exit 2; }
+done
+[ -f "$ROOT/config/sites/$SITE.yaml" ] || { echo "no site profile config/sites/$SITE.yaml" >&2; exit 2; }
 mkdir -p "$STATE"
 
 LLM_ARGS=()
@@ -45,9 +57,10 @@ exec podman run --rm --name "${HPC_AGENT_CONTAINER:-hpc-ai-agent}" \
     --cap-drop=ALL --security-opt=no-new-privileges \
     --pids-limit=256 --memory=1g \
     -p "127.0.0.1:${PORT}:8080" \
-    -v "$ROOT/fixtures:$APP/fixtures:ro,Z" \
-    -v "$ROOT/test_data:$APP/test_data:ro,Z" \
-    -v "$ROOT/knowledge:$APP/knowledge:ro,Z" \
+    -e "HPC_AGENT_SITE=$SITE" \
+    -v "$DATA/fixtures:$APP/fixtures:ro,Z" \
+    -v "$DATA/test_data:$APP/test_data:ro,Z" \
+    -v "$DATA/knowledge:$APP/knowledge:ro,Z" \
     -v "$STATE:$APP/audit-data:rw,Z" \
     -v "$(realpath "$TOKENS"):/run/secrets/operators.json:ro,Z" \
     "${LLM_ARGS[@]}" "$@" "$IMAGE"

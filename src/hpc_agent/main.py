@@ -121,8 +121,8 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(report.render())
         if report.imported and not args.dry_run:
-            print(f"next: copy config/ and the site's knowledge/ into {args.output}, then run with "
-                  f"HPC_AGENT_DATA_ROOT={args.output}")
+            print(f"next: put the site's knowledge/ into {args.output}, then start the container with "
+                  f"HPC_AGENT_DATA_DIR={args.output} (see docs/pilot-runbook.md)")
         return 1 if report.rejected else 0
 
     if args.command == "evaluate":

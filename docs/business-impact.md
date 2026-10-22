@@ -71,6 +71,9 @@ These are workflow timings, **not MTTR**.
 6. **Reporting rule.** Report MTTR or localization-time changes only from this protocol,
    with the period, site, sample size and interval stated.
 
+The operational procedure for running this protocol at a site is in
+[pilot-runbook.md](pilot-runbook.md) (Traditional Chinese).
+
 ## What is needed before any claim
 
 - Representative incidents: real, de-identified, labelled by site engineers.

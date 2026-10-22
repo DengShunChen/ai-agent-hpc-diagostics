@@ -139,7 +139,7 @@ tests/{unit,safety,scenarios}/
 containers/        Containerfile, requirements.lock (hash-locked)
 scripts/           run_tests, run_dev, run_api, demo, lock_requirements, podman_run, container_smoke_test
 docs/              architecture, safety, scenarios, evaluation (generated), demo,
-                   business-impact, site-replication, aiops-proposal (zh-TW)
+                   business-impact, site-replication, pilot-runbook (zh-TW), aiops-proposal (zh-TW)
 config/sites/      site profiles (diagnostic thresholds per site)
 audit-data/        runtime state and audit logs (git-ignored)
 ```
@@ -340,6 +340,14 @@ Run the container:
 
 ```bash
 HPC_AGENT_OPERATOR_TOKENS=~/.config/hpc-agent/operators.json scripts/podman_run.sh
+```
+
+For a pilot, mount imported data (see `hpc-agent import-export`) instead of the synthetic
+fixtures, and select the site profile. The procedure is in
+[docs/pilot-runbook.md](docs/pilot-runbook.md):
+
+```bash
+HPC_AGENT_DATA_DIR=~/hpc-pilot/data HPC_AGENT_SITE=<site-id> HPC_AGENT_STATE_DIR=~/hpc-pilot/audit-data HPC_AGENT_OPERATOR_TOKENS=~/.config/hpc-agent/operators.json scripts/podman_run.sh
 ```
 
 Check the container's security posture and run one approval cycle:
