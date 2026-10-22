@@ -22,7 +22,7 @@ from pathlib import Path
 
 from hpc_agent.data_adapter import ALLOWED_DIRS, ReadOnlyDataAdapter, default_data_root
 from hpc_agent.llm.explainer import Explanation, explain
-from hpc_agent.llm.provider import LLMProvider
+from hpc_agent.llm.provider import ChatLLM, LLMProvider
 from hpc_agent.logging.audit_logger import AppendOnlyLog
 from hpc_agent.models import (
     ActionForReview,
@@ -34,7 +34,7 @@ from hpc_agent.models import (
     HypothesisStatus,
     Incident,
 )
-from hpc_agent.models.approval import HUMAN_DECISION_STATUSES, is_human_operator
+from hpc_agent.models.approval import HUMAN_DECISION_STATUSES, AgentReasoning, is_human_operator
 from hpc_agent.safety.approval import InvalidTransitionError, transition
 from hpc_agent.safety.policy import Operation, SafetyPolicy
 from hpc_agent.tools.gateway import ToolGateway
@@ -118,6 +118,9 @@ def build_approval_request(run: DiagnosticRun, status: ApprovalStatus) -> Approv
         remediation_summary=run.remediation.summary if run.remediation else "",
         deferred=[f"({d.confidence:.2f}) {d.cause}: {d.reason}" for d in run.remediation.deferred]
         if run.remediation else [],
+        agents=[AgentReasoning(agent="triage-agent", reasoning=run.triage.reasoning, note=run.triage.reasoning_note),
+                *(AgentReasoning(agent=d.agent, reasoning=d.reasoning, note=d.reasoning_note) for d in run.diagnoses)],
+        discarded_proposals=[f"{d.agent}: {p}" for d in run.diagnoses for p in d.discarded_proposals],
         note=note,
     )
 
@@ -129,6 +132,7 @@ class ApprovalService:
         adapter: ReadOnlyDataAdapter,
         gateway: ToolGateway,
         scopes: Mapping[str, frozenset[str]] | None = None,
+        reasoning_llm: ChatLLM | None = None,
     ) -> None:
         resolved = state_dir.resolve()
         data_root = adapter.root
@@ -137,6 +141,7 @@ class ApprovalService:
         self._adapter = adapter
         self._gateway = gateway
         self._scopes = scopes
+        self.reasoning_llm = reasoning_llm  # None: rule-based agents
         self.runs = RunStore(resolved / "runs")
         self.approvals = AppendOnlyLog(resolved / "approvals.jsonl")
         self.audit = AppendOnlyLog(resolved / "audit.jsonl")
@@ -144,7 +149,7 @@ class ApprovalService:
 
     # --- diagnosis -----------------------------------------------------------------
     def diagnose(self, incident: Incident, supersedes: str | None = None) -> DiagnosticRun:
-        run = run_diagnosis(incident, self._gateway, self._scopes)
+        run = run_diagnosis(incident, self._gateway, self._scopes, llm=self.reasoning_llm)
         if supersedes:
             run = run.model_copy(update={"supersedes": supersedes})
         self.runs.save(run)
@@ -300,6 +305,11 @@ def render_review(request: ApprovalRequest) -> str:
         ]
     if not request.actions:
         lines.append("  none")
+    lines.append("\nAGENT REASONING")
+    lines += [f"  - {a.agent}: {a.reasoning}" + (f" ({a.note})" if a.note else "") for a in request.agents]
+    if request.discarded_proposals:
+        lines.append("  discarded model proposals (failed the deterministic checks; not findings):")
+        lines += [f"    - {p}" for p in request.discarded_proposals]
     if request.remediation_summary:
         lines += ["\nREMEDIATION PLAN", f"  {request.remediation_summary}"]
         lines += [f"  deferred: {d}" for d in request.deferred]

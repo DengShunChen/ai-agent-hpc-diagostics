@@ -192,8 +192,11 @@ def create_app(service: ApprovalService, tokens: OperatorTokens | None, llm: LLM
 
     @app.get("/api/llm")
     def llm_status(_: Operator) -> dict:
+        reasoning = service.reasoning_llm
         return {"configured": llm is not None, "provider": getattr(llm, "name", None),
-                "model": getattr(llm, "model", None)}
+                "model": getattr(llm, "model", None),
+                "agent_reasoning": "llm" if reasoning is not None else "rules",
+                "agent_model": getattr(reasoning, "model", None)}
 
     @app.post("/api/runs/{run_id}/explanation", status_code=201)
     def create_explanation(run_id: str, op: Operator) -> dict:

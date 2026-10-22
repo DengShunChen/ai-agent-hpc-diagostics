@@ -87,6 +87,16 @@ class ActionForReview(BaseModel):
     reference: str | None = None
 
 
+class AgentReasoning(BaseModel):
+    """How one agent reached its output: rules, an LLM (checked by rules), or rules as fallback."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    agent: NonEmptyStr
+    reasoning: str
+    note: str = ""
+
+
 class ApprovalRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -102,4 +112,7 @@ class ApprovalRequest(BaseModel):
     actions: list[ActionForReview] = Field(default_factory=list)
     remediation_summary: str = ""
     deferred: list[NonEmptyStr] = Field(default_factory=list)
+    agents: list[AgentReasoning] = Field(default_factory=list)
+    # Model proposals the deterministic checks discarded ("agent: proposal: reason").
+    discarded_proposals: list[NonEmptyStr] = Field(default_factory=list)
     note: NonEmptyStr

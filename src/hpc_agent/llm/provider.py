@@ -1,7 +1,10 @@
 """LLM provider abstraction and a local-only Ollama client.
 
-The provider sends a system prompt and a user prompt and returns text. It never sends tool
-definitions, so the model cannot call anything. Only local endpoints are accepted, and
+`generate` sends a system and a user prompt and returns text; it never sends tool
+definitions (the explainer uses it). `chat` is for the LLM-driven agents: it may offer
+tool definitions, but the model's tool calls are only returned to the caller, which runs
+them through the agent's ScopedGateway (allowlisted, read-only). Nothing here executes
+anything the model asks for. Only local endpoints are accepted, and
 Ollama ":cloud" models (which forward requests to a remote service) are refused unless
 HPC_AGENT_LLM_ALLOW_CLOUD=1 is set explicitly.
 
@@ -40,6 +43,15 @@ class LLMProvider(Protocol):
     def generate(self, system: str, prompt: str) -> str: ...
 
 
+class ChatLLM(Protocol):
+    """A provider that can hold a multi-turn conversation and propose tool calls."""
+
+    name: str
+    model: str
+
+    def chat(self, messages: list[dict], tools: list[dict] | None = None, json_output: bool = False) -> dict: ...
+
+
 def is_cloud_model(model: str) -> bool:
     tag = model.rsplit(":", 1)[-1].lower() if ":" in model else ""
     return tag == "cloud" or tag.endswith("-cloud")
@@ -69,24 +81,59 @@ class OllamaProvider:
         self._timeout = timeout_s
         self._max_tokens = max_tokens
 
-    def generate(self, system: str, prompt: str) -> str:
-        body = json.dumps({
-            "model": self.model,
-            "stream": False,
-            "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
-            # Deterministic decoding; no "tools" field is ever sent.
-            "options": {"temperature": 0, "seed": 42, "num_predict": self._max_tokens},
-        }).encode()
-        request = urllib.request.Request(self._url, data=body, headers={"Content-Type": "application/json"})
+    def _post(self, body: dict) -> dict:
+        request = urllib.request.Request(self._url, data=json.dumps(body).encode(),
+                                         headers={"Content-Type": "application/json"})
         try:
             with urllib.request.urlopen(request, timeout=self._timeout) as response:  # noqa: S310 (local only)
                 payload = json.loads(response.read(MAX_RESPONSE_BYTES))
         except (urllib.error.URLError, TimeoutError, ValueError, OSError) as error:
             raise LLMUnavailableError(f"Ollama request failed: {error}") from None
-        content = (payload.get("message") or {}).get("content") if isinstance(payload, dict) else None
+        message = payload.get("message") if isinstance(payload, dict) else None
+        if not isinstance(message, dict):
+            raise LLMUnavailableError("Ollama returned no message")
+        return message
+
+    def generate(self, system: str, prompt: str) -> str:
+        message = self._post({
+            "model": self.model,
+            "stream": False,
+            "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
+            # Deterministic decoding; no "tools" field is ever sent.
+            "options": {"temperature": 0, "seed": 42, "num_predict": self._max_tokens},
+        })
+        content = message.get("content")
         if not isinstance(content, str):
             raise LLMUnavailableError("Ollama returned no message content")
         return content
+
+    def chat(self, messages: list[dict], tools: list[dict] | None = None, json_output: bool = False) -> dict:
+        """One model turn. Returns {"content": str, "tool_calls": [{"name": str, "arguments": dict}]}."""
+        body: dict = {
+            "model": self.model,
+            "stream": False,
+            "messages": messages,
+            "options": {"temperature": 0, "seed": 42, "num_predict": max(self._max_tokens, 1200), "num_ctx": 8192},
+        }
+        if tools:
+            body["tools"] = tools
+        if json_output:
+            body["format"] = "json"
+        message = self._post(body)
+        calls = []
+        for call in message.get("tool_calls") or []:
+            function = call.get("function") if isinstance(call, dict) else None
+            if not isinstance(function, dict) or not isinstance(function.get("name"), str):
+                continue
+            arguments = function.get("arguments")
+            if isinstance(arguments, str):
+                try:
+                    arguments = json.loads(arguments)
+                except ValueError:
+                    arguments = {}
+            calls.append({"name": function["name"], "arguments": arguments if isinstance(arguments, dict) else {}})
+        content = message.get("content")
+        return {"content": content if isinstance(content, str) else "", "tool_calls": calls}
 
 
 def provider_from_env() -> LLMProvider | None:
@@ -102,3 +149,23 @@ def provider_from_env() -> LLMProvider | None:
         timeout_s=float(os.environ.get("HPC_AGENT_LLM_TIMEOUT", DEFAULT_TIMEOUT_S)),
         allow_cloud=os.environ.get("HPC_AGENT_LLM_ALLOW_CLOUD") == "1",
     )
+
+
+REASONING_MODES = ("llm", "rules")
+
+
+def reasoning_llm_from_env() -> ChatLLM | None:
+    """The model that drives triage and the specialists, or None for rule-based reasoning.
+
+    HPC_AGENT_REASONING=llm|rules (default rules). LLM reasoning is opt-in: MODEL_PROVIDER alone
+    only enables the explainer, because the evaluated local models score below the rules.
+    """
+    mode = os.environ.get("HPC_AGENT_REASONING", "").strip().lower() or "rules"
+    if mode not in REASONING_MODES:
+        raise LLMConfigError(f"HPC_AGENT_REASONING must be one of {REASONING_MODES}, got {mode!r}")
+    if mode == "rules":
+        return None
+    provider = provider_from_env()
+    if provider is None:
+        raise LLMConfigError("HPC_AGENT_REASONING=llm needs MODEL_PROVIDER (and MODEL_NAME)")
+    return provider  # type: ignore[return-value]

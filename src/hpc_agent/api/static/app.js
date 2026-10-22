@@ -22,6 +22,7 @@ const DOMAIN = {
   "multi-domain": "跨領域", unknown: "未知",
 };
 const RISK = { low: "低", medium: "中", high: "高" };
+const REASONING = { llm: "AI 推理（已通過規則檢查）", rules: "規則", "rules-fallback": "規則（AI 無法使用，改用規則）" };
 const AI_STATUS = { accepted: "已採用", rejected: "已拒絕（未通過證據檢查）", unavailable: "無法使用（LLM 未回應）" };
 const HTTP_ERRORS = {
   401: "驗證失敗：token 無效或未提供",
@@ -240,6 +241,9 @@ async function openReview(runId) {
       ...(review.actions.length ? review.actions.map(renderAction) : [el("p", "沒有提出補救動作。")]));
     $("review-remediation").textContent = review.remediation_summary || "";
     fillList("review-deferred", review.deferred);
+    fillList("review-agents", (review.agents || []).map(
+      (a) => `${a.agent}：${label(REASONING, a.reasoning)}${a.note ? `（${a.note}）` : ""}`));
+    fillList("review-discarded", review.discarded_proposals || []);
     fillList("review-missing", review.missing_information);
     fillList("review-checks", review.recommended_checks);
     $("review-note").textContent = reviewNote(review);

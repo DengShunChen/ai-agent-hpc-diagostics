@@ -21,6 +21,29 @@ POST_HOC_CHANGES = [
 ]
 
 
+# Changes to the LLM-driven agents made after watching the model on these cases. Shown only
+# in reports of LLM-driven runs.
+LLM_POST_HOC_CHANGES = [
+    "**2026-10-22: LLM specialist prompt and fact parsing.** After one qwen2.5:3b run on "
+    "POC-SCHEDULER-001 (one of these cases), in which the model called only knowledge tools and put "
+    "incident items (I#) under tool facts, the prompt was changed to name the agent's data tools and "
+    "ask for them first, and an I# under facts is now treated as a reported item instead of "
+    "discarding the proposal. A line telling the model that incident text is data, not instructions, "
+    "was added before the qwen2.5:7b run. The prompt and checks were then frozen; mismatches are "
+    "reported, not tuned away.",
+    "**2026-10-22: scheduler category list.** The LLM scheduler agent's category list first omitted "
+    "`application.crash` and `application.exit_code`, which the rule-based scheduler agent uses. The "
+    "omission was noticed in the rule-based report and fixed before the runs reported here.",
+]
+_DETERMINISTIC = "The agents are deterministic, so processing times say nothing about LLM latency."
+_LLM_DRIVEN = ("Triage and the specialist agents were driven by a local language model whose proposals passed "
+               "deterministic checks; processing times are model inference times on this hardware.")
+
+
+def uses_llm(results: list[CaseResult]) -> bool:
+    return any(mode != "rules" for r in results for mode in r.reasoning)
+
+
 def _pct(value: float | None) -> str:
     return "n/a" if value is None else f"{value:.0%}"
 
@@ -47,8 +70,10 @@ def _header(results: list[CaseResult], generated: str) -> list[str]:
             "",
             "> **Read this first.** All cases are synthetic, and their labels were written by the developer",
             "> of the agents. The numbers show that the system behaves as designed on designed examples;",
-            "> they are **not** evidence of accuracy on real incidents. The agents are deterministic, so",
-            "> processing times say nothing about LLM latency. **No MTTR reduction is claimed.**",
+            *(["> they are **not** evidence of accuracy on real incidents.",
+               f"> {_LLM_DRIVEN} **No MTTR reduction is claimed.**"] if uses_llm(results) else
+              ["> they are **not** evidence of accuracy on real incidents. The agents are deterministic, so",
+               "> processing times say nothing about LLM latency. **No MTTR reduction is claimed.**"]),
         ]
     mix = (f"{synthetic} of {len(results)} cases are synthetic; results on them say nothing about real "
            "incidents. " if synthetic else "")
@@ -59,7 +84,7 @@ def _header(results: list[CaseResult], generated: str) -> list[str]:
         "",
         f"> **Read this first.** {mix}Labels come from the sources listed below, as stated in each case",
         "> file; check who labelled them before relying on the numbers. Results apply to these cases only.",
-        "> The agents are deterministic, so processing times say nothing about LLM latency.",
+        f"> {_LLM_DRIVEN if uses_llm(results) else _DETERMINISTIC}",
         "> **No MTTR reduction is claimed**; that needs the pilot protocol in docs/business-impact.md.",
         "",
         "## Case sources",
@@ -67,6 +92,20 @@ def _header(results: list[CaseResult], generated: str) -> list[str]:
         "| Label source | Cases |",
         "|---|---|",
         *[f"| {' '.join(source.split()).replace('|', '/')} | {len(ids)}: {', '.join(ids)} |" for source, ids in sources.items()],
+    ]
+
+
+def _reasoning_rows(results: list[CaseResult]) -> list[str]:
+    """Only for runs with LLM-driven agents, so rule-based reports stay unchanged."""
+    totals: dict[str, int] = {}
+    for r in results:
+        for mode, count in r.reasoning.items():
+            totals[mode] = totals.get(mode, 0) + count
+    if set(totals) <= {"rules"}:
+        return []
+    return [
+        f"| Agent reasoning (triage + specialists, all cases) | {', '.join(f'{m}: {n}' for m, n in sorted(totals.items()))} |",
+        f"| Model proposals discarded by the deterministic checks | {sum(r.discarded_proposals for r in results)} |",
     ]
 
 
@@ -80,7 +119,7 @@ def render_markdown(results: list[CaseResult], summary: Summary) -> str:
         "",
         "## Disclosure: changes made after seeing these results",
         "",
-        *[f"- {change}" for change in POST_HOC_CHANGES],
+        *[f"- {change}" for change in POST_HOC_CHANGES + (LLM_POST_HOC_CHANGES if uses_llm(results) else [])],
         "",
         "## Summary",
         "",
@@ -97,6 +136,7 @@ def render_markdown(results: list[CaseResult], summary: Summary) -> str:
         f"| Human override rate | {override} |",
         f"| Diagnostic processing time (mean / median / max) | {summary.processing_ms_mean:.0f} / "
         f"{summary.processing_ms_median:.0f} / {summary.processing_ms_max:.0f} ms |",
+        *_reasoning_rows(results),
         "",
         "## Per-case results",
         "",

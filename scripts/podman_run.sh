@@ -18,8 +18,10 @@
 # The data dir must hold fixtures/, test_data/ and knowledge/. The site profile is read from
 # config/sites/ inside the image, so add it before building.
 #
-# Optional local LLM explainer (Ollama on this host, listening on 127.0.0.1:11434):
-#   MODEL_PROVIDER=ollama MODEL_NAME=qwen2.5:3b scripts/podman_run.sh
+# Optional local LLM (Ollama on this host, listening on 127.0.0.1:11434). It writes the evidence
+# explanations; with HPC_AGENT_REASONING=llm it also drives triage and the specialist agents
+# (default rules: see docs/evaluation-llm.md):
+#   MODEL_PROVIDER=ollama MODEL_NAME=qwen2.5:7b HPC_AGENT_REASONING=llm scripts/podman_run.sh
 # This adds a pasta mapping so the container can reach the host's loopback as
 # host.containers.internal. Note: that mapping exposes ALL host-loopback services to the
 # container, so it is only added when MODEL_PROVIDER is set.
@@ -48,7 +50,8 @@ if [ -n "${MODEL_PROVIDER:-}" ]; then
               -e "MODEL_PROVIDER=$MODEL_PROVIDER"
               -e "MODEL_NAME=${MODEL_NAME:-qwen2.5:3b}"
               -e "MODEL_ENDPOINT=http://host.containers.internal:11434"
-              -e "HPC_AGENT_LLM_TIMEOUT=${HPC_AGENT_LLM_TIMEOUT:-300}")
+              -e "HPC_AGENT_LLM_TIMEOUT=${HPC_AGENT_LLM_TIMEOUT:-300}"
+              -e "HPC_AGENT_REASONING=${HPC_AGENT_REASONING:-rules}")
 fi
 
 exec podman run --rm --name "${HPC_AGENT_CONTAINER:-hpc-ai-agent}" \

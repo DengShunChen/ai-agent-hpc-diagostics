@@ -215,15 +215,33 @@ flowchart LR
 - **Framework boundary**: agents are plain Python classes. Microsoft Agent Framework
   (`agent-framework-core`) is used only in `workflows/` to route messages between executors.
   An exception in any agent aborts the run (fail closed).
-- **What "agent" means here:** each agent is a software agent: a component with one role,
-  its own scoped tools, and messages routed by the workflow framework. The agents are
-  deterministic and rule-based. No LLM decides which tools to call or what the hypotheses
-  are.
+- **LLM-driven agents** (`agents/llm_agents.py`, `HPC_AGENT_REASONING=llm`): triage and the
+  four specialists are driven by a local model. Each specialist is offered only the tools of
+  its own scope and decides which to call and what to propose. What a human sees is decided
+  by deterministic checks:
+  - Tool arguments never come from the model: data tools always get this incident's ID; a
+    knowledge query must pass the gateway's argument pattern. Calls go through the agent's
+    `ScopedGateway`, so the scope, call budget and audit log apply unchanged.
+  - Every fact must cite a tool result the agent fetched (`T#`), by field and exact value.
+    The evidence statement and the affected components are written from the matched data,
+    never from the model's words.
+  - Categories come from a fixed per-domain list. Confidence is capped (0.6 with tool facts,
+    0.3 with reports only). Nothing can be confirmed; ruling a cause out needs tool data.
+  - Text with numbers that are not in the data, commands, confirmation claims or
+    credential-like content is discarded. Discarded proposals are listed for the reviewer.
+  - If the model is unavailable or its answer is unusable, the rule-based agent runs instead
+    (`reasoning: rules-fallback`). Triage keywords may add a domain the model missed, never
+    remove one.
+  - The RCA Coordinator and the remediation agent stay deterministic: correlation and the
+    playbook are not delegated to the model.
+- **Rule-based agents** (`HPC_AGENT_REASONING=rules`, the default): the
+  original deterministic agents. They are also the fallback, and the baseline the LLM
+  agents are evaluated against.
 - **Local LLM explainer** (`llm/provider.py`, `llm/explainer.py`): an optional
   `LLMProvider` with a local-only `OllamaProvider` (standard-library HTTP, no new
   dependencies). It writes a Traditional Chinese explanation of an existing run.
-  - It runs outside the diagnostic path, on request through the API or CLI. It has no tools,
-    and a test enforces that it has no access to the gateway, data adapter or approval code.
+  - It runs after a diagnosis, on request through the API or CLI. It has no tools, and a test
+    enforces that the `llm/` package has no access to the gateway, data adapter or approval code.
   - Its output is validated deterministically and rejected as a whole on any failure. It is
     stored separately (`explanations.jsonl`) and never changes a run.
   - The provider is selected by `MODEL_PROVIDER` / `MODEL_NAME` / `MODEL_ENDPOINT`.

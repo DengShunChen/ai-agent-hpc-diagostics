@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from hpc_agent.models.diagnosis import Domain, Evidence
+from hpc_agent.models.diagnosis import Domain, Evidence, Reasoning
 from hpc_agent.models.incident import IncidentId, NonEmptyStr
 
 
@@ -20,3 +20,5 @@ class TriageResult(BaseModel):
     symptoms: list[NonEmptyStr] = Field(default_factory=list)
     available_evidence: list[Evidence] = Field(default_factory=list)
     missing_evidence: list[NonEmptyStr] = Field(default_factory=list)
+    reasoning: Reasoning = "rules"
+    reasoning_note: str = ""

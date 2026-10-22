@@ -107,6 +107,13 @@ class ToolGateway:
     def registered_tools(self) -> tuple[str, ...]:
         return tuple(sorted(self._registry))
 
+    def describe(self, name: str) -> tuple[str, frozenset[str]]:
+        """A registered tool's description and argument names (for offering it to a model)."""
+        spec = self._registry.get(name)
+        if spec is None:
+            raise ToolNotAllowedError(f"tool not registered: {name!r}")
+        return spec.description, spec.parameters
+
     def invoke(self, name: object, **kwargs: object) -> ToolResult:
         spec = self._registry.get(name) if isinstance(name, str) else None
         if spec is None:
@@ -154,6 +161,11 @@ class ScopedGateway:
         self.allowed_tools = scopes.get(agent, frozenset()) & set(gateway.registered_tools())
         self._log = log
         self._budget = budget or CallBudget()
+
+    def describe(self, tool: str) -> tuple[str, frozenset[str]]:
+        if tool not in self.allowed_tools:
+            raise ToolNotAllowedError(f"{self.agent} is not permitted to call {tool!r}")
+        return self._gateway.describe(tool)
 
     def invoke(self, tool: str, **kwargs: str) -> ToolResult:
         if tool not in self.allowed_tools:

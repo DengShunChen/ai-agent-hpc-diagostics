@@ -16,6 +16,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from hpc_agent.models.incident import IncidentId, NonEmptyStr
 
 Confidence = Annotated[float, Field(ge=0.0, le=1.0)]
+# How an agent reached its output: deterministic rules, a language model (whose proposals
+# passed deterministic checks), or rules because the model was unavailable or unusable.
+Reasoning = Literal["rules", "llm", "rules-fallback"]
 
 
 class Domain(StrEnum):
@@ -135,6 +138,10 @@ class AgentDiagnosis(BaseModel):
     # Knowledge-base material (SOPs, manuals, past incidents): context, never evidence.
     references: list[Evidence] = Field(default_factory=list)
     confidence: Confidence = 0.0
+    reasoning: Reasoning = "rules"
+    reasoning_note: str = ""  # model used, or why the rules were used instead
+    # Model proposals that failed the deterministic checks, with the reason (never shown as findings).
+    discarded_proposals: list[NonEmptyStr] = Field(default_factory=list)
     human_approval_required: Literal[True] = True
 
     @model_validator(mode="after")

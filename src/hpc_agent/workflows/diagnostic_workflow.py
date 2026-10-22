@@ -21,8 +21,11 @@ from typing import Never, Protocol
 from agent_framework import Executor, WorkflowBuilder, WorkflowContext, handler
 
 from hpc_agent.agents import GpuAgent, NetworkAgent, RCACoordinator, SchedulerAgent, StorageAgent, TriageAgent
+from hpc_agent.agents.llm_agents import LLMSpecialist, LLMTriageAgent
 from hpc_agent.agents.remediation import RemediationAgent
+from hpc_agent.agents.triage import AGENT_FOR_DOMAIN
 from hpc_agent.config import load_agent_tool_scopes, load_site_profile
+from hpc_agent.llm.provider import ChatLLM
 from hpc_agent.models import (
     AgentDiagnosis,
     DiagnosticRun,
@@ -146,8 +149,12 @@ def _select(message: TriagedIncident, target_ids: list[str]) -> list[str]:
     return [t for t in target_ids if t in message.triage.selected_agents]
 
 
-def default_specialists(profile: SiteProfile) -> list[Specialist]:
-    return [StorageAgent(profile), SchedulerAgent(), NetworkAgent(), GpuAgent(profile)]
+def default_specialists(profile: SiteProfile, llm: ChatLLM | None = None) -> list[Specialist]:
+    rules: list[Specialist] = [StorageAgent(profile), SchedulerAgent(), NetworkAgent(), GpuAgent(profile)]
+    if llm is None:
+        return rules
+    domains = {a: d for d, a in AGENT_FOR_DOMAIN.items()}
+    return [LLMSpecialist(agent, domains[agent.name], llm) for agent in rules]
 
 
 async def run_diagnosis_async(
@@ -156,16 +163,18 @@ async def run_diagnosis_async(
     scopes: Mapping[str, frozenset[str]] | None = None,
     specialists: Sequence[Specialist] | None = None,
     profile: SiteProfile | None = None,
+    llm: ChatLLM | None = None,
 ) -> DiagnosticRun:
+    """With `llm`, triage and the specialists are LLM-driven (rules check them and are the fallback)."""
     scopes = load_agent_tool_scopes() if scopes is None else scopes
     profile = load_site_profile() if profile is None else profile
-    specialists = default_specialists(profile) if specialists is None else specialists
+    specialists = default_specialists(profile, llm) if specialists is None else specialists
     log: list[ToolInvocationRecord] = []
     budget = CallBudget(profile.tool_call_budget)
     start = datetime.now(UTC)
 
     implemented = frozenset(a.name for a in specialists)
-    triage_executor = TriageExecutor(TriageAgent())
+    triage_executor = TriageExecutor(LLMTriageAgent(llm) if llm is not None else TriageAgent())
     coordinator = CoordinatorExecutor(
         RCACoordinator(timedelta(minutes=profile.correlation_window_minutes)), implemented
     )
@@ -210,8 +219,9 @@ def run_diagnosis(
     scopes: Mapping[str, frozenset[str]] | None = None,
     specialists: Sequence[Specialist] | None = None,
     profile: SiteProfile | None = None,
+    llm: ChatLLM | None = None,
 ) -> DiagnosticRun:
-    return asyncio.run(run_diagnosis_async(incident, gateway, scopes, specialists, profile))
+    return asyncio.run(run_diagnosis_async(incident, gateway, scopes, specialists, profile, llm))
 
 
 def _tag(kind: EvidenceKind) -> str:
@@ -238,6 +248,13 @@ def render_report(run: DiagnosticRun) -> str:
     lines += [f"  [{_tag(e.kind)}] {e.statement}   <{e.source}>" for e in rca.facts] or ["  none"]
     lines.append("\nFINDINGS")
     lines += [f"  {d.agent} (confidence {d.confidence:.2f}): {d.finding or 'no finding'}" for d in run.diagnoses]
+    lines.append("\nAGENT REASONING (llm = model proposals that passed the deterministic checks)")
+    for item, agent in [(t, "triage-agent"), *((d, d.agent) for d in run.diagnoses)]:
+        lines.append(f"  {agent}: {item.reasoning}" + (f" ({item.reasoning_note})" if item.reasoning_note else ""))
+    discarded = [(d.agent, p) for d in run.diagnoses for p in d.discarded_proposals]
+    if discarded:
+        lines.append("  discarded model proposals (not findings):")
+        lines += [f"    - {agent}: {p}" for agent, p in discarded]
     lines.append("\nHYPOTHESES (ranked, unconfirmed)")
     for i, c in enumerate(open_causes, 1):
         lines.append(f"  {i}. [{c.domain}] ({c.confidence:.2f}) {c.cause}")

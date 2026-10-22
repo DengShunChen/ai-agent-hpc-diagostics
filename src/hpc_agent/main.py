@@ -78,6 +78,8 @@ def _parser() -> argparse.ArgumentParser:
                           help="approvals.jsonl with real human decisions (for the override rate)")
     evaluate.add_argument("--output", type=Path, default=None, help="write the Markdown report here")
     evaluate.add_argument("--json", type=Path, default=None, help="write per-case results as JSON here")
+    evaluate.add_argument("--reasoning", choices=("rules", "llm"), default="rules",
+                          help="llm: diagnose with the LLM-driven agents (needs MODEL_PROVIDER; slow on CPU)")
     return parser
 
 
@@ -131,8 +133,20 @@ def main(argv: list[str] | None = None) -> int:
         from hpc_agent.evaluation.harness import evaluate as run_evaluation
         from hpc_agent.evaluation.report import render_markdown
 
+        from hpc_agent.llm.provider import LLMConfigError, provider_from_env
+
+        llm = None
+        if args.reasoning == "llm":
+            try:
+                llm = provider_from_env()
+            except LLMConfigError as error:
+                print(f"error: {error}", file=sys.stderr)
+                return 2
+            if llm is None:
+                print("error: --reasoning llm needs MODEL_PROVIDER=ollama and MODEL_NAME", file=sys.stderr)
+                return 2
         results, summary = run_evaluation(args.cases or adapter.root / "evaluation" / "cases",
-                                          approvals_log=args.approvals_log)
+                                          approvals_log=args.approvals_log, llm=llm)
         report = render_markdown(results, summary)
         if args.output:
             args.output.write_text(report, encoding="utf-8")
@@ -152,8 +166,14 @@ def main(argv: list[str] | None = None) -> int:
         print(secret)
         return 0
 
-    service = ApprovalService(default_state_dir(), adapter, gateway)
-    from hpc_agent.llm.provider import LLMConfigError, provider_from_env
+    from hpc_agent.llm.provider import LLMConfigError, provider_from_env, reasoning_llm_from_env
+
+    try:
+        reasoning_llm = reasoning_llm_from_env()
+    except LLMConfigError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+    service = ApprovalService(default_state_dir(), adapter, gateway, reasoning_llm=reasoning_llm)
 
     if args.command == "serve":
         import uvicorn
@@ -169,12 +189,18 @@ def main(argv: list[str] | None = None) -> int:
                   file=sys.stderr)
         llm = provider_from_env()
         print(f"LLM explainer: {f'{llm.name}:{llm.model}' if llm else 'not configured'}", file=sys.stderr)
+        print(f"Agent reasoning: {f'LLM ({reasoning_llm.name}:{reasoning_llm.model}), checked by rules' if reasoning_llm else 'rules'}",
+              file=sys.stderr)
         uvicorn.run(create_app(service, tokens, llm), host=args.host, port=args.port, server_header=False)
         return 0
     try:
         if args.command == "diagnose":
             incident = adapter.load_incident(args.incident_id)
-            run = run_diagnosis(incident, gateway) if args.no_save else service.diagnose(incident)
+            if reasoning_llm:
+                print(f"Agents reasoning with {reasoning_llm.name}:{reasoning_llm.model} (local; may take minutes)...",
+                      file=sys.stderr)
+            run = (run_diagnosis(incident, gateway, llm=reasoning_llm) if args.no_save
+                   else service.diagnose(incident))
             print(render_report(run))
             if not args.no_save:
                 print(f"\nRun {run.run_id} recorded: {service.status(run.run_id).status}")

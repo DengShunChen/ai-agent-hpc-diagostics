@@ -32,6 +32,7 @@ from hpc_agent.logging.audit_logger import AppendOnlyLog
 from hpc_agent.models import DiagnosticRun, EvidenceKind, HypothesisStatus, Incident
 from hpc_agent.safety.secrets import assert_no_credentials
 from hpc_agent.tools.gateway import build_default_gateway
+from hpc_agent.llm.provider import ChatLLM
 from hpc_agent.workflows.diagnostic_workflow import run_diagnosis
 
 Outcome = Literal["supported_hypothesis", "insufficient_evidence", "no_supported_hypothesis"]
@@ -82,6 +83,9 @@ class CaseResult(BaseModel):
     references: int
     proposed_actions: int
     duration_ms: float
+    # Agent reasoning in this run: e.g. {"llm": 3, "rules-fallback": 1}; discarded model proposals.
+    reasoning: dict[str, int] = Field(default_factory=dict)
+    discarded_proposals: int = 0
 
 
 class Summary(BaseModel):
@@ -118,6 +122,13 @@ def _outcome(run: DiagnosticRun) -> Outcome:
     if any(e.kind is EvidenceKind.TOOL_RESULT for e in open_causes[0].supporting_evidence):
         return "supported_hypothesis"
     return "insufficient_evidence"
+
+
+def _reasoning_counts(run: DiagnosticRun) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in [run.triage, *run.diagnoses]:
+        counts[item.reasoning] = counts.get(item.reasoning, 0) + 1
+    return counts
 
 
 def score(case: Case, run: DiagnosticRun) -> CaseResult:
@@ -161,6 +172,8 @@ def score(case: Case, run: DiagnosticRun) -> CaseResult:
         references=len(rca.references),
         proposed_actions=len(rca.recommended_actions),
         duration_ms=(run.end_time - run.start_time).total_seconds() * 1000,
+        reasoning=_reasoning_counts(run),
+        discarded_proposals=sum(len(d.discarded_proposals) for d in run.diagnoses),
     )
 
 
@@ -231,12 +244,14 @@ def evaluate(
     scopes: Mapping[str, frozenset[str]] | None = None,
     project_root: Path | None = None,
     approvals_log: Path | None = None,
+    llm: ChatLLM | None = None,
 ) -> tuple[list[CaseResult], Summary]:
+    """With `llm`, the cases are diagnosed by the LLM-driven agents (rules check them)."""
     project_root = project_root or default_data_root()
     results = []
     with tempfile.TemporaryDirectory(prefix="hpc-agent-eval-") as tmp:
         for case in load_cases(cases_dir):
             adapter, incident = _case_root(case, Path(tmp), project_root)
-            run = run_diagnosis(incident, build_default_gateway(adapter), scopes)
+            run = run_diagnosis(incident, build_default_gateway(adapter), scopes, llm=llm)
             results.append(score(case, run))
     return results, summarize(results, approvals_log)

@@ -23,7 +23,7 @@ Asia, and is meant to grow into a Uvance AIOps customer proposal.
 
 | Goal | What exists now | What is still needed |
 |---|---|---|
-| Multi-agent root-cause analysis across network, storage and scheduler layers | Triage, storage/scheduler/network/GPU diagnosis, RCA Coordinator, **remediation agent**, all coordinated by Microsoft Agent Framework | LLM-driven reasoning (the agents are rule-based software agents; see known limitations) |
+| Multi-agent root-cause analysis across network, storage and scheduler layers | Triage, storage/scheduler/network/GPU diagnosis, RCA Coordinator, **remediation agent**, all coordinated by Microsoft Agent Framework. Triage and the specialists can be **LLM-driven** (`HPC_AGENT_REASONING=llm`): the model picks tools and proposes; deterministic checks keep only grounded proposals | A model that beats the rules: on the synthetic cases, local 3B/7B models on CPU score well below the rules ([docs/evaluation-llm.md](docs/evaluation-llm.md)) |
 | Operational safety | Human approval, no execution path, allowlisted read-only tools, runtime guards, hash-chained audit | Production security review |
 | Shorter fault localization (Business Impact) | `hpc-agent metrics` (workflow timings, override rate), [measurement protocol](docs/business-impact.md) | Baseline and pilot measurement. **No reduction is claimed.** |
 | Rollout across sites (Replicability) | Site profiles (`config/sites/`), per-site metrics, a single container image, the [site rollout guide](docs/site-replication.md), an offline **export importer** with a data contract and de-identification (`hpc-agent import-export`) | Each site's export procedure (security review); cases labelled by each site |
@@ -43,9 +43,12 @@ its own.
 
 - Agents cite SOPs, manuals and past incidents from the knowledge base as references only.
 - Every run is checked against runtime safety invariants before it is returned.
-- The diagnostic agents are deterministic and rule-based. An optional local LLM (Ollama)
-  writes a Traditional Chinese explanation of each run's existing evidence. It can't add
-  facts or change anything (see "Local LLM explainer").
+- Triage and the four specialists run in one of two modes. With `HPC_AGENT_REASONING=llm`, a
+  local model (Ollama) chooses which read-only tools to call and proposes hypotheses, and
+  deterministic checks keep only proposals grounded in the data it fetched (see "LLM-driven
+  agents"). With `rules` (the default), deterministic agents do the work; they
+  are also the fallback. A local LLM can also write a Traditional Chinese explanation of a
+  run's evidence (see "Local LLM explainer").
 - Every saved run waits for a human decision: approve, reject or request revision. Decisions
   are recorded in a tamper-evident audit trail and are never executed.
 - An authenticated HTTP API and a minimal review page serve the same workflow. Operators
@@ -218,6 +221,32 @@ The demo walks through all three scenarios, the refused AI approval, the revisio
 tamper detection and the evaluation summary. Add `DEMO_PAUSE=1` to pause between steps. The
 presenter notes are in [docs/demo.md](docs/demo.md).
 
+## LLM-driven agents (optional)
+
+Requires a local Ollama model; `qwen2.5:7b` or larger is recommended.
+
+```bash
+MODEL_PROVIDER=ollama MODEL_NAME=qwen2.5:7b HPC_AGENT_REASONING=llm PYTHONPATH=src .venv/bin/python -m hpc_agent.main diagnose POC-SCHEDULER-001 --no-save
+```
+
+- Triage: the model picks the domains and cites the incident items behind each. The keyword
+  rules may add a domain the model missed, never remove one.
+- Specialists: each is offered only the tools in its scope, and decides which to call. Tool
+  arguments never come from the model (data tools always get this incident's ID).
+- Every hypothesis must cite fetched tool values by field and value. The evidence statement and
+  components are written from the matched data. Categories are fixed, confidence is capped at
+  0.6, nothing can be confirmed, and text with ungrounded numbers, commands, confirmation claims
+  or credential-like content is discarded.
+- Discarded proposals and each agent's reasoning mode (`llm`, `rules`, `rules-fallback`) appear in
+  the report and on the review page.
+- The RCA Coordinator and the remediation agent stay deterministic.
+
+Measured on the 13 synthetic cases on this CPU-only host ([docs/evaluation-llm.md](docs/evaluation-llm.md)):
+top-1 root cause 36% (7B) and 55% (3B) against 100% for the rules. Every kept proposal cited fetched
+data or an incident item, and the 7B run had no unsupported claims under the harness definition (3B
+had 2 grounded but wrong ones). A diagnosis takes 1–3 minutes. Until a model beats the rules
+on independently labelled incidents, `rules` stays the recommended mode for review work.
+
 ## Local LLM explainer (optional)
 
 Requires a local Ollama with a local model, for example `ollama pull qwen2.5:3b`.
@@ -372,9 +401,12 @@ Container properties:
 
 ## Known limitations
 
-- **"Agent" here means a software agent, not an LLM agent.** The diagnostic agents are
-  deterministic rule-based components, each with its own role, scoped tools and messages. No
-  model chooses tools or forms hypotheses. The optional LLM only re-phrases existing evidence.
+- **LLM-driven agents are an option, not yet better than the rules.** With
+  `HPC_AGENT_REASONING=llm` the model chooses tools and forms hypotheses, but local 3B/7B models
+  on CPU score well below the rule-based agents on the synthetic cases, and the checks verify
+  that evidence exists, not that the reasoning about it is right (a 3B run cited a real 83%
+  usage as a capacity problem). The fact matcher also rejects some grounded citations
+  (dotted field paths); see [docs/evaluation-llm.md](docs/evaluation-llm.md).
 - A small local model on CPU is slow (tens of seconds to minutes per explanation), and its
   output is often rejected by the grounding checks. That's by design: an unsupported
   explanation is never shown.
