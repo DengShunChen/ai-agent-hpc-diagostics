@@ -26,7 +26,7 @@ Asia, and is meant to grow into a Uvance AIOps customer proposal.
 | Multi-agent root-cause analysis across network, storage and scheduler layers | Triage, storage/scheduler/network/GPU diagnosis, RCA Coordinator, **remediation agent**, all coordinated by Microsoft Agent Framework | LLM-driven reasoning (the agents are rule-based software agents; see known limitations) |
 | Operational safety | Human approval, no execution path, allowlisted read-only tools, runtime guards, hash-chained audit | Production security review |
 | Shorter fault localization (Business Impact) | `hpc-agent metrics` (workflow timings, override rate), [measurement protocol](docs/business-impact.md) | Baseline and pilot measurement. **No reduction is claimed.** |
-| Rollout across sites (Replicability) | Site profiles (`config/sites/`), per-site metrics, a single container image, the [site rollout guide](docs/site-replication.md) | Read-only data adapters for each site; cases labelled by each site |
+| Rollout across sites (Replicability) | Site profiles (`config/sites/`), per-site metrics, a single container image, the [site rollout guide](docs/site-replication.md), an offline **export importer** with a data contract and de-identification (`hpc-agent import-export`) | Each site's export procedure (security review); cases labelled by each site |
 | Uvance AIOps proposal | [Customer proposal draft](docs/aiops-proposal.md) (internal, with honest evidence status) | Pilot results and business/legal review |
 
 ## POC scope
@@ -128,11 +128,13 @@ src/hpc_agent/
   logging/         audit_logger.py (hash-chained append-only JSONL)
   api/             routes.py (FastAPI) + static/ (review page)
   evaluation/      harness.py (metrics), report.py (Markdown report, scenario comparison)
+  ingest/          contract.py (data contract), deidentify.py, importer.py, csv_export.py (reference adapter)
   config.py, data_adapter.py, main.py (CLI)
 fixtures/incidents/                 synthetic POC incidents
 test_data/<domain>/<incident_id>/   saved synthetic tool outputs
 knowledge/{incidents,sop,manuals}/  synthetic knowledge base (reference material only)
 evaluation/cases/                   labelled synthetic evaluation cases
+examples/site-export/               synthetic CSV export for `hpc-agent import-export`
 tests/{unit,safety,scenarios}/
 containers/        Containerfile, requirements.lock (hash-locked)
 scripts/           run_tests, run_dev, run_api, demo, lock_requirements, podman_run, container_smoke_test
@@ -382,6 +384,9 @@ Container properties:
 - No API or UI yet.
 - Operator identity is a naming-rule guard only; real authentication is future work.
 - The credential scanner is pattern-based and can miss novel secret formats.
+- The export importer pseudonymizes host, job and filesystem names and rejects IP addresses,
+  e-mail addresses, domain names and home paths, but it can't recognise every personal or
+  customer detail in free text (symptoms, logs, notes). A person must review those before use.
 - On the CLI, `--operator` is asserted, not authenticated; the CLI is for a trusted local
   shell. The HTTP API derives identity from bearer tokens. There is no SSO, rate limiting or
   TLS: keep it on localhost, or put it behind an authenticating TLS reverse proxy before

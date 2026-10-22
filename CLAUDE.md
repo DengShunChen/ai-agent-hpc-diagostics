@@ -52,4 +52,6 @@ Never push to any Git remote unless explicitly instructed.
 - `src/hpc_agent/workflows/approval_workflow.py` — the only place decisions are recorded; never give
   agents a reference to it, never add an execution path, never rewrite `audit-data/` logs
 - `src/hpc_agent/data_adapter.py` — the only reader of `fixtures/`, `test_data/`, `knowledge/`
+- `src/hpc_agent/ingest/` — offline import of exported files into a data root outside the repo; adapters
+  parse files only (no network, no commands, no live systems); never weaken the contract or de-identification
 - `tests/{unit,safety,scenarios}/`

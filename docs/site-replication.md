@@ -28,11 +28,34 @@ below 0.3. Tests enforce all of this (`tests/unit/test_site_profile.py`).
      storage percentage, OST imbalance spread, GPU thermal limit, correlation window and
      remediation confidence.
    - Run with `HPC_AGENT_SITE=<site-id>`.
-3. **Data adapters, read-only.**
-   - Export job and node status, filesystem and OST usage, interface status and
-     DCGM-style GPU health into the saved-data formats in `test_data/`.
-   - Keep the exports read-only, and keep identifiers de-identified until a separate
-     review approves otherwise.
+3. **Data import, offline and read-only.**
+   - A person exports job and node status, filesystem and OST usage, interface status and
+     DCGM-style GPU health with the site's own approved tools. The platform never connects
+     to the source systems.
+   - Write the export as the CSV files described in `src/hpc_agent/ingest/csv_export.py`
+     (example: `examples/site-export/`), or write a site adapter that implements
+     `SiteExportAdapter` in `src/hpc_agent/ingest/importer.py`.
+   - Import it into a data root **outside the repository**:
+
+     ```
+     export HPC_AGENT_PSEUDONYM_KEY=...   # at least 32 characters; kept by the site, never committed
+     hpc-agent import-export <export-dir> --output <data-root> --dry-run
+     hpc-agent import-export <export-dir> --output <data-root>
+     ```
+
+   - What the importer does:
+     - validates every dataset against the data contract (`ingest/contract.py`): unknown
+       fields and columns are refused, numbers are bounded, timestamps need a timezone;
+     - replaces host, job and filesystem names with keyed pseudonyms, consistently across
+       an incident and its datasets, so correlation still works;
+     - rejects any incident that still contains an IP address, e-mail address, domain
+       name, home-directory path or credential-like content. Nothing is repaired, and the
+       report names field locations, never values;
+     - never overwrites existing files and writes them with mode 0600.
+   - Review the free text (symptoms, alerts, logs, notes) by hand. Only known names are
+     pseudonymized; other personal or customer details can't be detected automatically.
+   - Copy `config/` and the site's `knowledge/` into the data root, then run with
+     `HPC_AGENT_DATA_ROOT=<data-root>`.
 4. **Knowledge base.** Add the site's SOPs (`SOP-*`), manuals (`MAN-*`) and resolved
    incidents (`SIM-HIST-*` or the site's own IDs) as Markdown. The loader rejects
    credential-like content.

@@ -1,0 +1,2 @@
+incident_id,node,interface,state,rx_errors,tx_errors,link_flaps,last_change,members
+SIM-EXPORT-003,sim-node-0201,bond0,down,0,0,0,,

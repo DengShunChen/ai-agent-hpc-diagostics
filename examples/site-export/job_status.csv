@@ -1,0 +1,3 @@
+incident_id,job_id,scheduler,state,exit_code,requested_walltime,elapsed,end_time,allocated_nodes,termination_reason
+SIM-EXPORT-001,SIM-JOB-20001,slurm-sim,FAILED,137,04:00:00,01:47:12,2026-01-15T03:11:40Z,sim-node-0042 | sim-node-0043,
+SIM-EXPORT-003,SIM-JOB-50001,slurm-sim,FAILED,143,04:00:00,01:00:00,,sim-node-0201,

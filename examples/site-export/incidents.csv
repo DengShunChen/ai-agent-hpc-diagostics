@@ -1,0 +1,4 @@
+incident_id,timestamp,severity,system,node,job_id,symptoms,alerts,logs,operator_notes
+SIM-EXPORT-001,2026-01-15T03:12:00Z,medium,HPC,sim-node-0042,SIM-JOB-20001,batch job terminated before reaching its walltime | user reports no application error message in job output,scheduler event: node sim-node-0042 state changed to DRAIN,job SIM-JOB-20001 ended with exit code 137,drain reason not yet checked
+SIM-EXPORT-002,2026-02-03T21:40:00Z,high,HPC,sim-gpu-node-0007,SIM-JOB-30001,distributed training job aborted with a CUDA error,GPU monitoring: XID event reported on sim-gpu-node-0007 GPU 3,CUDA error: an illegal memory access was encountered,
+SIM-EXPORT-003,2026-03-10T08:05:00Z,high,HPC,sim-node-0201,SIM-JOB-50001,MPI job lost connection to peers,network link down alert on sim-node-0201,,

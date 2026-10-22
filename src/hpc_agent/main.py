@@ -16,6 +16,7 @@
     hpc-agent explain RUN-ID [--operator NAME]        local-LLM explanation of a run (MODEL_PROVIDER=ollama)
     hpc-agent metrics [--json]                        workflow timings per site (not MTTR)
     hpc-agent compare-pilot FILE.csv [--min-n 10]     baseline vs assisted localization time / MTTR
+    hpc-agent import-export DIR --output DATA_ROOT [--dry-run]   validate + de-identify a site's CSV export
 
 Decisions are recorded only; nothing is ever executed. On the CLI, --operator is an asserted
 identity; the HTTP API instead derives the operator from an authenticated bearer token.
@@ -58,6 +59,10 @@ def _parser() -> argparse.ArgumentParser:
     pilot = sub.add_parser("compare-pilot", help="compare baseline vs assisted pilot periods")
     pilot.add_argument("csv", type=Path)
     pilot.add_argument("--min-n", type=int, default=10)
+    imp = sub.add_parser("import-export", help="import a site's exported CSV files into a separate data root")
+    imp.add_argument("export_dir", type=Path)
+    imp.add_argument("--output", type=Path, required=True, help="new data root, outside the repository")
+    imp.add_argument("--dry-run", action="store_true", help="validate and report only; write nothing")
     explain = sub.add_parser("explain", help="ask the local LLM to explain a run's evidence")
     explain.add_argument("run_id")
     explain.add_argument("--operator", default=None)
@@ -102,6 +107,23 @@ def main(argv: list[str] | None = None) -> int:
         incidents, problems = pilot_analysis.load(args.csv)
         print(pilot_analysis.render(pilot_analysis.analyse(incidents, args.min_n), problems))
         return 0
+
+    if args.command == "import-export":
+        from hpc_agent.ingest.csv_export import CsvExportAdapter
+        from hpc_agent.ingest.deidentify import DeidentificationError, Pseudonymizer
+        from hpc_agent.ingest.importer import ExportImportError, import_export
+
+        try:
+            report = import_export(CsvExportAdapter(args.export_dir), args.output, Pseudonymizer.from_env(),
+                                   forbidden_root=adapter.root, dry_run=args.dry_run)
+        except (ExportImportError, DeidentificationError) as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 2
+        print(report.render())
+        if report.imported and not args.dry_run:
+            print(f"next: copy config/ and the site's knowledge/ into {args.output}, then run with "
+                  f"HPC_AGENT_DATA_ROOT={args.output}")
+        return 1 if report.rejected else 0
 
     if args.command == "evaluate":
         import json
