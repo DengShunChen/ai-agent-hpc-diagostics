@@ -29,20 +29,54 @@ def _mark(value: bool | None) -> str:
     return "–" if value is None else ("yes" if value else "**no**")
 
 
+def is_synthetic(label_source: str) -> bool:
+    return label_source.strip().lower().startswith("synthetic")
+
+
+def _header(results: list[CaseResult], generated: str) -> list[str]:
+    """Title and caveat, worded from the cases' own label_source (never assumed)."""
+    sources: dict[str, list[str]] = {}
+    for r in results:
+        sources.setdefault(r.label_source, []).append(r.case_id)
+    synthetic = sum(1 for r in results if is_synthetic(r.label_source))
+    if results and synthetic == len(results):
+        return [
+            "# POC Evaluation Report",
+            "",
+            f"Generated {generated} by `hpc-agent evaluate` over {len(results)} synthetic cases.",
+            "",
+            "> **Read this first.** All cases are synthetic, and their labels were written by the developer",
+            "> of the agents. The numbers show that the system behaves as designed on designed examples;",
+            "> they are **not** evidence of accuracy on real incidents. The agents are deterministic, so",
+            "> processing times say nothing about LLM latency. **No MTTR reduction is claimed.**",
+        ]
+    mix = (f"{synthetic} of {len(results)} cases are synthetic; results on them say nothing about real "
+           "incidents. " if synthetic else "")
+    return [
+        "# Evaluation Report",
+        "",
+        f"Generated {generated} by `hpc-agent evaluate` over {len(results)} cases.",
+        "",
+        f"> **Read this first.** {mix}Labels come from the sources listed below, as stated in each case",
+        "> file; check who labelled them before relying on the numbers. Results apply to these cases only.",
+        "> The agents are deterministic, so processing times say nothing about LLM latency.",
+        "> **No MTTR reduction is claimed**; that needs the pilot protocol in docs/business-impact.md.",
+        "",
+        "## Case sources",
+        "",
+        "| Label source | Cases |",
+        "|---|---|",
+        *[f"| {' '.join(source.split()).replace('|', '/')} | {len(ids)}: {', '.join(ids)} |" for source, ids in sources.items()],
+    ]
+
+
 def render_markdown(results: list[CaseResult], summary: Summary) -> str:
     generated = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
     override = (f"{_pct(summary.human_override_rate)} of {summary.human_decisions} recorded decisions"
                 if summary.human_override_rate is not None
                 else "not measured: no recorded human decisions were supplied")
     lines = [
-        "# POC Evaluation Report",
-        "",
-        f"Generated {generated} by `hpc-agent evaluate` over {summary.cases} synthetic cases.",
-        "",
-        "> **Read this first.** All cases are synthetic, and their labels were written by the developer",
-        "> of the agents. The numbers show that the system behaves as designed on designed examples;",
-        "> they are **not** evidence of accuracy on real incidents. The agents are deterministic, so",
-        "> processing times say nothing about LLM latency. **No MTTR reduction is claimed.**",
+        *_header(results, generated),
         "",
         "## Disclosure: changes made after seeing these results",
         "",

@@ -61,6 +61,7 @@ class Case(BaseModel):
 class CaseResult(BaseModel):
     case_id: str
     description: str
+    label_source: str
     classification: str
     classification_correct: bool
     expected_outcome: Outcome
@@ -138,6 +139,7 @@ def score(case: Case, run: DiagnosticRun) -> CaseResult:
     return CaseResult(
         case_id=case.case_id,
         description=case.description,
+        label_source=case.label_source,
         classification=rca.classification,
         classification_correct=rca.classification in exp.classification,
         expected_outcome=exp.outcome,

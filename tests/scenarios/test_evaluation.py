@@ -93,3 +93,40 @@ def test_cli_writes_report_and_json(tmp_path, capsys):
     assert (tmp_path / "r.md").read_text().startswith("# POC Evaluation Report")
     data = json.loads((tmp_path / "r.json").read_text())
     assert data["summary"]["cases"] == len(data["cases"])
+
+
+def _relabelled(tmp_path, ids, source):
+    """Copies of bundled cases with a different label_source (as a site would write them)."""
+    directory = tmp_path / "cases"
+    directory.mkdir(exist_ok=True)
+    for path in sorted(CASES.glob("*.json")):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if data["case_id"] in ids:
+            data["label_source"] = source
+        (directory / path.name).write_text(json.dumps(data), encoding="utf-8")
+    return directory
+
+
+def test_report_header_follows_label_source_for_site_cases(tmp_path):
+    source = "site-a incident history; labelled by site engineers"
+    directory = _relabelled(tmp_path, {c.case_id for c in load_cases(CASES)}, source)
+    report = render_markdown(*evaluate(directory))
+    assert report.startswith("# Evaluation Report")
+    assert "synthetic" not in report.split("## Disclosure")[0]
+    assert f"| {source} | {len(load_cases(CASES))}:" in report
+    assert "No MTTR reduction is claimed" in report
+
+
+def test_report_header_counts_synthetic_cases_in_a_mixed_set(tmp_path):
+    directory = _relabelled(tmp_path, {"EVAL-GPU-001", "EVAL-NET-001"}, "site-a; labelled by site engineers")
+    report = render_markdown(*evaluate(directory))
+    total = len(load_cases(CASES))
+    assert report.startswith("# Evaluation Report")
+    assert f"{total - 2} of {total} cases are synthetic" in report
+    assert "| site-a; labelled by site engineers | 2: EVAL-GPU-001, EVAL-NET-001 |" in report
+
+
+def test_label_source_cannot_break_the_sources_table(tmp_path):
+    directory = _relabelled(tmp_path, {"EVAL-GPU-001"}, "site-a |\nlabelled | by ops")
+    report = render_markdown(*evaluate(directory))
+    assert "| site-a / labelled / by ops | 1: EVAL-GPU-001 |" in report
