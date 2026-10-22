@@ -4,7 +4,7 @@
 #   HPC_AGENT_OPERATOR_TOKENS=~/.config/hpc-agent/operators.json scripts/podman_run.sh
 #
 # Creates the token file first with:
-#   .venv/bin/python -m hpc_agent.main create-operator-token ops.yourname \
+#   PYTHONPATH=src .venv/bin/python -m hpc_agent.main create-operator-token ops.yourname \
 #       --tokens-file ~/.config/hpc-agent/operators.json
 #
 # Security settings: non-root (host UID mapped via keep-id), read-only root filesystem,
