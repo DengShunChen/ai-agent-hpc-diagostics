@@ -237,6 +237,10 @@ flowchart LR
 - **Rule-based agents** (`HPC_AGENT_REASONING=rules`, the default): the
   original deterministic agents. They are also the fallback, and the baseline the LLM
   agents are evaluated against.
+- **Permissions, hooks and traces** (`runtime/hooks.py`, `runtime/trace.py`): every tool call goes
+  through PreToolUse hooks (scope, `ask` permission, call limit) and PostToolUse hooks (withhold
+  credential-like results). The approval service stores each LLM-driven run's trace in a hash-chained
+  log; the CLI, API and review page show it.
 - **Model providers (hybrid)**: `llm/provider.py` (local Ollama, the default) and `llm/claude.py`
   (Claude through the official `anthropic` SDK). Both implement the same `chat`/`generate` interface, so
   the harness and the checks don't change. Claude is gated by the data class and an outbound scan (see

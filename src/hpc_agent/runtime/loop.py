@@ -15,6 +15,7 @@ import re
 from collections.abc import Callable
 
 from hpc_agent.llm.provider import ChatLLM
+from hpc_agent.runtime.trace import Emit, no_trace
 
 _JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
 
@@ -31,12 +32,15 @@ def parse_json(text: str) -> dict | None:
 
 
 def run_agent(llm: ChatLLM, system: str, user: str, tools: list[dict], max_rounds: int,
-              run_call: Callable[[str, dict], str]) -> dict | None:
+              run_call: Callable[[str, dict], str], emit: Emit = no_trace) -> dict | None:
     """Run the tool loop; return the model's final JSON answer, or None if it gave none."""
     messages: list[dict] = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    emit("prompt", system=system, user=user, tools=[t.get("function", {}).get("name") for t in tools])
     reply: dict = {"content": "", "tool_calls": []}
-    for _ in range(max_rounds):
+    for round_ in range(1, max_rounds + 1):
         reply = llm.chat(messages, tools=tools)
+        emit("model_reply", round=round_, content=reply["content"],
+             tool_calls=[{"name": c["name"], "arguments": c["arguments"]} for c in reply["tool_calls"]])
         if not reply["tool_calls"]:
             break
         assistant: dict = {"role": "assistant", "content": reply["content"],
@@ -56,11 +60,15 @@ def run_agent(llm: ChatLLM, system: str, user: str, tools: list[dict], max_round
         # Tools stay declared (some providers require it once tool calls are in the history);
         # the Ollama provider drops them for this JSON-only turn.
         messages.append({"role": "user", "content": "Answer now with the JSON object only."})
-        answer = parse_json(llm.chat(messages, tools=tools, json_output=True)["content"])
+        final = llm.chat(messages, tools=tools, json_output=True)["content"]
+        emit("model_reply", round="final-json", content=final, tool_calls=[])
+        answer = parse_json(final)
     return answer
 
 
-def ask_json(llm: ChatLLM, system: str, user: str) -> dict | None:
+def ask_json(llm: ChatLLM, system: str, user: str, emit: Emit = no_trace) -> dict | None:
     """One turn without tools, JSON output (used by triage)."""
+    emit("prompt", system=system, user=user, tools=[])
     reply = llm.chat([{"role": "system", "content": system}, {"role": "user", "content": user}], json_output=True)
+    emit("model_reply", round=1, content=reply["content"], tool_calls=[])
     return parse_json(reply["content"])

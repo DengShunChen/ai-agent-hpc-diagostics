@@ -86,6 +86,17 @@ whose operation the policy denies are all rejected.
 - The `query` argument may contain only letters, digits, spaces and `._/-`, up to 200
   characters. Shell metacharacters, quotes, newlines and `..` are rejected.
 
+## Permissions, hooks and traces
+
+- Each tool call a model asks for gets a permission: `deny` (outside the agent's scope), `ask`
+  (listed under `ask:` in its definition: needs a human, never run in an unattended diagnosis) or
+  `allow`. `ask` may only list tools that are already in scope.
+- PreToolUse hooks (scope, human approval, call limit) run before the call; PostToolUse hooks
+  withhold a result with credential-like content from the model. Hooks are fixed Python functions in
+  `runtime/hooks.py`; agent definitions can't add hooks, and no hook runs a command.
+- Traces record every step of LLM-driven agents, with credential-like content withheld and long text
+  shortened, in hash-chained `audit-data/traces/<run_id>.jsonl` files that `verify-audit` checks.
+
 ## Cloud model (Claude, optional)
 
 - Selected only with `MODEL_PROVIDER=anthropic`; the local Ollama provider stays the default.

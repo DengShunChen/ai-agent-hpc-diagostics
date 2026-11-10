@@ -26,6 +26,7 @@ from hpc_agent.agents.remediation import RemediationAgent
 from hpc_agent.agents.triage import AGENT_FOR_DOMAIN
 from hpc_agent.config import load_agent_tool_scopes, load_site_profile
 from hpc_agent.llm.provider import ChatLLM
+from hpc_agent.runtime.trace import TraceRecorder, no_trace
 from hpc_agent.models import (
     AgentDiagnosis,
     DiagnosticRun,
@@ -149,12 +150,14 @@ def _select(message: TriagedIncident, target_ids: list[str]) -> list[str]:
     return [t for t in target_ids if t in message.triage.selected_agents]
 
 
-def default_specialists(profile: SiteProfile, llm: ChatLLM | None = None) -> list[Specialist]:
+def default_specialists(profile: SiteProfile, llm: ChatLLM | None = None,
+                        trace: TraceRecorder | None = None) -> list[Specialist]:
     rules: list[Specialist] = [StorageAgent(profile), SchedulerAgent(), NetworkAgent(), GpuAgent(profile)]
     if llm is None:
         return rules
     domains = {a: d for d, a in AGENT_FOR_DOMAIN.items()}
-    return [LLMSpecialist(agent, domains[agent.name], llm, profile) for agent in rules]
+    return [LLMSpecialist(agent, domains[agent.name], llm, profile,
+                          emit=trace.for_agent(agent.name) if trace else no_trace) for agent in rules]
 
 
 async def run_diagnosis_async(
@@ -164,17 +167,21 @@ async def run_diagnosis_async(
     specialists: Sequence[Specialist] | None = None,
     profile: SiteProfile | None = None,
     llm: ChatLLM | None = None,
+    trace: TraceRecorder | None = None,
 ) -> DiagnosticRun:
-    """With `llm`, triage and the specialists are LLM-driven (rules check them and are the fallback)."""
+    """With `llm`, triage and the specialists are LLM-driven (rules check them and are the fallback).
+    With `trace`, every LLM agent step is recorded there."""
     scopes = load_agent_tool_scopes() if scopes is None else scopes
     profile = load_site_profile() if profile is None else profile
-    specialists = default_specialists(profile, llm) if specialists is None else specialists
+    specialists = default_specialists(profile, llm, trace) if specialists is None else specialists
     log: list[ToolInvocationRecord] = []
     budget = CallBudget(profile.tool_call_budget)
     start = datetime.now(UTC)
 
     implemented = frozenset(a.name for a in specialists)
-    triage_executor = TriageExecutor(LLMTriageAgent(llm) if llm is not None else TriageAgent())
+    triage_executor = TriageExecutor(
+        LLMTriageAgent(llm, emit=trace.for_agent("triage-agent") if trace else no_trace) if llm is not None
+        else TriageAgent())
     coordinator = CoordinatorExecutor(
         RCACoordinator(timedelta(minutes=profile.correlation_window_minutes)), implemented
     )
@@ -220,8 +227,9 @@ def run_diagnosis(
     specialists: Sequence[Specialist] | None = None,
     profile: SiteProfile | None = None,
     llm: ChatLLM | None = None,
+    trace: TraceRecorder | None = None,
 ) -> DiagnosticRun:
-    return asyncio.run(run_diagnosis_async(incident, gateway, scopes, specialists, profile, llm))
+    return asyncio.run(run_diagnosis_async(incident, gateway, scopes, specialists, profile, llm, trace))
 
 
 def _tag(kind: EvidenceKind) -> str:

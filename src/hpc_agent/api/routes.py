@@ -176,6 +176,10 @@ def create_app(service: ApprovalService, tokens: OperatorTokens | None, llm: LLM
     def history(run_id: str, _: Operator) -> list[dict]:
         return [r.model_dump(mode="json") for r in service.history(run_id)]
 
+    @app.get("/api/runs/{run_id}/trace")
+    def trace(run_id: str, _: Operator) -> list[dict]:
+        return service.trace(run_id)
+
     @app.post("/api/runs/{run_id}/decision")
     def decide(run_id: str, body: DecisionRequest, op: Operator) -> dict:
         record = service.decide(run_id, ApprovalStatus(body.decision), op, body.comment)

@@ -250,6 +250,15 @@ MODEL_PROVIDER=ollama MODEL_NAME=qwen2.5:7b HPC_AGENT_REASONING=llm PYTHONPATH=s
   or credential-like content is discarded.
 - Discarded proposals and each agent's reasoning mode (`llm`, `rules`, `rules-fallback`) appear in
   the report and on the review page.
+- **Permissions and hooks** (`runtime/hooks.py`): every requested call passes PreToolUse hooks
+  (scope -> `deny`; tools listed under `ask:` in the agent's definition need a human and are never run
+  during an unattended diagnosis; call limit) and PostToolUse hooks (a result with credential-like
+  content is withheld from the model). Hooks are fixed code; configuration can't add one.
+- **Traces**: each LLM-driven run stores what every agent did (prompt, model replies, each tool call
+  with the permission decision and the arguments the model asked for versus the ones actually used,
+  what the checks kept or discarded, fallbacks) in `audit-data/traces/<run_id>.jsonl`, hash-chained.
+  View it with `hpc-agent trace RUN-ID`, `GET /api/runs/{id}/trace` or the review page's
+  「AI 執行過程」; `hpc-agent verify-audit` verifies the trace chains too.
 - The RCA Coordinator and the remediation agent stay deterministic.
 
 Measured on the 13 synthetic cases on this CPU-only host ([docs/evaluation-llm.md](docs/evaluation-llm.md)):

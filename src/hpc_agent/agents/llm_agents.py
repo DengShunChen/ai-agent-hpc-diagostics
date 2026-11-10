@@ -37,6 +37,7 @@ from hpc_agent.runtime.context import incident_brief, incident_items
 from hpc_agent.runtime.definitions import AgentDefinition, load_definitions
 from hpc_agent.runtime.loop import ask_json, run_agent
 from hpc_agent.runtime.tools import ToolSession, run_tool, tool_specs
+from hpc_agent.runtime.trace import Emit, no_trace
 from hpc_agent.safety.secrets import find_credential_like
 from hpc_agent.tools.gateway import ScopedGateway
 
@@ -199,8 +200,9 @@ class LLMSpecialist:
     """
 
     def __init__(self, rules: Any, domain: Domain, llm: ChatLLM, profile: SiteProfile = DEFAULT_PROFILE,
-                 definition: AgentDefinition | None = None) -> None:
+                 definition: AgentDefinition | None = None, emit: Emit = no_trace) -> None:
         self.name = rules.name
+        self._emit = emit
         self.domain = domain
         self._rules = rules
         self._llm = llm
@@ -215,6 +217,7 @@ class LLMSpecialist:
         try:
             return self._diagnose(incident, gateway)
         except (LLMUnavailableError, _Unusable, ValidationError) as error:
+            self._emit("fallback", reason=str(error))
             diagnosis = self._rules.diagnose(incident, gateway)
             return diagnosis.model_copy(update={"reasoning": "rules-fallback",
                                                 "reasoning_note": f"{self._llm.model}: {error}"})
@@ -224,14 +227,19 @@ class LLMSpecialist:
         data_tools = ", ".join(t for t in sorted(gateway.allowed_tools) if not t.startswith("search_")) or "none"
         system = self._definition.render(domain=self.domain.value, categories=", ".join(self._categories),
                                          data_tools=data_tools, thresholds=self._thresholds)
-        session = ToolSession(max_calls=self._definition.llm.max_tool_calls)
+        session = ToolSession(max_calls=self._definition.llm.max_tool_calls, ask=frozenset(self._definition.ask),
+                              emit=self._emit)
         answer = run_agent(
             self._llm, system, incident_brief(incident, items), tool_specs(gateway), self._definition.llm.max_rounds,
             lambda name, arguments: run_tool(name, arguments, incident, gateway, session, self.domain.value),
+            emit=self._emit,
         )
         if answer is None:
             raise _Unusable("answer was not valid JSON")
-        return self._check(incident, gateway, answer, reported, session)
+        diagnosis = self._check(incident, gateway, answer, reported, session)
+        self._emit("checks", kept=[f"{c.status.value}: {c.category} ({c.confidence:.2f})" for c in diagnosis.possible_causes],
+                   discarded=diagnosis.discarded_proposals, evidence=[e.statement for e in diagnosis.evidence])
+        return diagnosis
 
     def _fact(self, cited: Any, s: ToolSession) -> tuple[Evidence | None, list[str], str | None]:
         if not isinstance(cited, dict):
@@ -403,8 +411,9 @@ class LLMTriageAgent:
 
     name = "triage-agent"
 
-    def __init__(self, llm: ChatLLM, definition: AgentDefinition | None = None) -> None:
+    def __init__(self, llm: ChatLLM, definition: AgentDefinition | None = None, emit: Emit = no_trace) -> None:
         self._llm = llm
+        self._emit = emit
         self._rules = TriageAgent()
         self._definition = definition or load_definitions()[self.name]
 
@@ -413,12 +422,13 @@ class LLMTriageAgent:
         try:
             return self._triage(incident, rules)
         except (LLMUnavailableError, _Unusable) as error:
+            self._emit("fallback", reason=str(error))
             return rules.model_copy(update={"reasoning": "rules-fallback",
                                             "reasoning_note": f"{self._llm.model}: {error}"})
 
     def _triage(self, incident: Incident, rules: TriageResult) -> TriageResult:
         reported, items = incident_items(incident, with_source=False)
-        answer = ask_json(self._llm, self._definition.render(), items or "no reported items")
+        answer = ask_json(self._llm, self._definition.render(), items or "no reported items", emit=self._emit)
         if answer is None:
             raise _Unusable("answer was not valid JSON")
         signals: dict[Domain, list[str]] = {}
@@ -455,6 +465,8 @@ class LLMTriageAgent:
         note = f"{self._llm.name}:{self._llm.model}"
         if added:
             note += f"; keyword rules added: {', '.join(d.value for d in added)}"
+        self._emit("checks", kept=[d.value for d in model_domains], added_by_rules=[d.value for d in added],
+                   classification=classification.value)
         return TriageResult(
             incident_id=incident.incident_id,
             classification=classification,

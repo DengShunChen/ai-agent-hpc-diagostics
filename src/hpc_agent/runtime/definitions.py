@@ -51,6 +51,7 @@ class AgentDefinition(BaseModel):
     description: str = Field(min_length=1, max_length=300)
     domain: str = Field(pattern=r"^[a-z-]+$")
     tools: tuple[str, ...] = ()
+    ask: tuple[str, ...] = ()  # tools that need a human's approval: never run during an unattended diagnosis
     llm: LLMSettings | None = None
     prompt: str = ""
 
@@ -74,6 +75,8 @@ def parse_definition(text: str, source: str) -> AgentDefinition:
         raise DefinitionError(f"{source}: {error.error_count()} problem(s) in the definition") from None
     if definition.llm and any(not re.match(_CATEGORY, c) for c in definition.llm.categories):
         raise DefinitionError(f"{source}: invalid category name")
+    if not set(definition.ask) <= set(definition.tools):
+        raise DefinitionError(f"{source}: 'ask' may only list tools in 'tools'")
     if definition.prompt and definition.llm is None:
         raise DefinitionError(f"{source}: a prompt needs an 'llm' section")
     return definition

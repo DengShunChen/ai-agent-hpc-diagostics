@@ -9,6 +9,7 @@
     hpc-agent revise RUN-ID --operator NAME           re-diagnose a rejected run as a new run
     hpc-agent close RUN-ID --operator NAME
     hpc-agent history RUN-ID                          approval transitions
+    hpc-agent trace RUN-ID                            what each LLM agent did (prompt, replies, tool calls, checks)
     hpc-agent verify-audit                            verify both hash chains
     hpc-agent serve [--host 127.0.0.1] [--port 8080]  HTTP API + review page
     hpc-agent create-operator-token NAME --tokens-file PATH   prints a new token once
@@ -25,6 +26,7 @@ identity; the HTTP API instead derives the operator from an authenticated bearer
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -55,7 +57,7 @@ def _parser() -> argparse.ArgumentParser:
     diagnose = sub.add_parser("diagnose", help="diagnose a fixture incident")
     diagnose.add_argument("incident_id")
     diagnose.add_argument("--no-save", action="store_true", help="do not record the run for approval")
-    for name in ("review", "history"):
+    for name in ("review", "history", "trace"):
         sub.add_parser(name).add_argument("run_id")
     for name in [*DECISIONS, "revise", "close"]:
         cmd = sub.add_parser(name)
@@ -137,8 +139,6 @@ def main(argv: list[str] | None = None) -> int:
         return 1 if report.rejected else 0
 
     if args.command == "evaluate":
-        import json
-
         from hpc_agent.evaluation.harness import evaluate as run_evaluation
         from hpc_agent.evaluation.report import render_markdown
 
@@ -231,6 +231,13 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "revise":
             run = service.revise(args.run_id, args.operator, args.comment)
             print(f"{args.run_id}: REVISE. New run {run.run_id} awaits approval (supersedes {run.supersedes}).")
+        elif args.command == "trace":
+            events = service.trace(args.run_id)
+            if not events:
+                print("no agent trace (rule-based run)")
+            for e in events:
+                detail = {k: v for k, v in e.items() if k not in ("seq", "at", "agent", "kind")}
+                print(f"{e['seq']:>3} {e['agent']:<16} {e['kind']:<12} {json.dumps(detail, ensure_ascii=False)[:300]}")
         elif args.command == "history":
             for r in service.history(args.run_id):
                 who = f" by {r.operator}" if r.operator else ""
@@ -255,8 +262,6 @@ def main(argv: list[str] | None = None) -> int:
 
             summary = metrics.summarize(metrics.collect(service))
             if args.json:
-                import json
-
                 print(json.dumps([m.model_dump() for m in summary], indent=2))
             else:
                 print(metrics.render(summary))
@@ -264,6 +269,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"audit.jsonl: {service.audit.verify()} records, chain OK")
             print(f"approvals.jsonl: {service.approvals.verify()} records, chain OK")
             print(f"explanations.jsonl: {service.explanations.verify()} records, chain OK")
+            files, events = service.verify_traces()
+            print(f"traces/: {files} run trace(s), {events} events, chains OK")
     except (KeyError, ValueError, PermissionError, AuditIntegrityError, LLMConfigError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2

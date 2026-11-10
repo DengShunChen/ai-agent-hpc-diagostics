@@ -38,6 +38,7 @@ from hpc_agent.models.approval import HUMAN_DECISION_STATUSES, AgentReasoning, i
 from hpc_agent.safety.approval import InvalidTransitionError, transition
 from hpc_agent.safety.policy import Operation, SafetyPolicy
 from hpc_agent.tools.gateway import ToolGateway
+from hpc_agent.runtime.trace import TraceRecorder
 from hpc_agent.workflows.diagnostic_workflow import run_diagnosis
 
 S = ApprovalStatus
@@ -146,13 +147,18 @@ class ApprovalService:
         self.approvals = AppendOnlyLog(resolved / "approvals.jsonl")
         self.audit = AppendOnlyLog(resolved / "audit.jsonl")
         self.explanations = AppendOnlyLog(resolved / "explanations.jsonl")
+        self._traces = resolved / "traces"
 
     # --- diagnosis -----------------------------------------------------------------
     def diagnose(self, incident: Incident, supersedes: str | None = None) -> DiagnosticRun:
-        run = run_diagnosis(incident, self._gateway, self._scopes, llm=self.reasoning_llm)
+        trace = TraceRecorder()
+        run = run_diagnosis(incident, self._gateway, self._scopes, llm=self.reasoning_llm, trace=trace)
         if supersedes:
             run = run.model_copy(update={"supersedes": supersedes})
         self.runs.save(run)
+        traces = AppendOnlyLog(self._traces / f"{run.run_id}.jsonl")
+        for event in trace.events:
+            traces.append(event)
         record = ApprovalRecord(run_id=run.run_id, incident_id=run.incident_id, status=S.DRAFT)
         self._record_transition(record)
         for status in (S.DIAGNOSIS_COMPLETE, S.AWAITING_HUMAN_APPROVAL):
@@ -203,6 +209,16 @@ class ApprovalService:
 
     def status(self, run_id: str) -> ApprovalRecord:
         return self.history(run_id)[-1]
+
+    def trace(self, run_id: str) -> list[dict]:
+        """The run's agent trace (empty for rule-based runs), after verifying its hash chain."""
+        self.runs.load(run_id)  # validates the id and that the run exists
+        return AppendOnlyLog(self._traces / f"{run_id}.jsonl").records()
+
+    def verify_traces(self) -> tuple[int, int]:
+        """(trace files, events) after verifying every trace's hash chain."""
+        files = sorted(self._traces.glob("run-*.jsonl")) if self._traces.is_dir() else []
+        return len(files), sum(AppendOnlyLog(path).verify() for path in files)
 
     def review(self, run_id: str) -> ApprovalRequest:
         return build_approval_request(self.runs.load(run_id), self.status(run_id).status)

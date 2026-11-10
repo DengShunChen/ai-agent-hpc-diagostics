@@ -78,6 +78,17 @@ function el(tag, text, className) {
   return node;
 }
 
+const TRACE_KIND = {
+  prompt: "提示", model_reply: "模型回覆", tool_call: "工具呼叫", tool_result: "工具結果",
+  checks: "規則檢查", fallback: "改用規則",
+};
+
+function traceLine(e) {
+  const { seq, at, agent, kind, ...detail } = e;
+  const text = JSON.stringify(detail);
+  return `${agent}・${TRACE_KIND[kind] || kind}：${text.length > 400 ? text.slice(0, 400) + "…" : text}`;
+}
+
 function fillList(id, items) {
   const list = $(id);
   list.replaceChildren(...(items.length ? items.map((t) => el("li", t)) : [el("li", "無")]));
@@ -244,6 +255,9 @@ async function openReview(runId) {
     fillList("review-agents", (review.agents || []).map(
       (a) => `${a.agent}：${label(REASONING, a.reasoning)}${a.note ? `（${a.note}）` : ""}`));
     fillList("review-discarded", review.discarded_proposals || []);
+    const trace = await api(`/api/runs/${encodeURIComponent(runId)}/trace`);
+    $("review-trace").replaceChildren(...(trace.length ? trace.map((e) => el("li", traceLine(e)))
+      : [el("li", "沒有 AI 執行紀錄（規則式診斷）")]));
     fillList("review-missing", review.missing_information);
     fillList("review-checks", review.recommended_checks);
     $("review-note").textContent = reviewNote(review);
