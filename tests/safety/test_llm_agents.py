@@ -285,3 +285,56 @@ def test_credential_like_model_text_is_never_kept(tmp_path, adapter, gateway, sc
     shown = render_review(service.review(run.run_id)) + json.dumps(service.review(run.run_id).model_dump(mode="json"))
     for text in (stored, shown, json.dumps(d.model_dump(mode="json"))):
         assert "hunter2" not in text
+
+
+def gpu_run(adapter, gateway, scopes, fact):
+    llm = FakeLLM({"gpu": [calls("get_gpu_health"), answer(hypotheses=[
+        {"cause": "GPU 3 reported an XID event", "category": "gpu.application", "confidence": 0.4, "facts": [fact]}])]})
+    run = run_diagnosis(adapter.load_incident("POC-GPU-001"), gateway, scopes, llm=llm)
+    return next(d for d in run.diagnoses if d.agent == "gpu-agent"), run
+
+
+@pytest.mark.parametrize("fact", [
+    {"ref": "T1", "field": "xid_events.count", "value": 1, "where": "sim-gpu-node-0007:3"},
+    {"ref": "T1", "field": "gpus[3].xid_events[0].xid", "value": 13, "where": "sim-gpu-node-0007/3"},
+    {"ref": "T1", "field": "count", "value": 1, "where": "node=sim-gpu-node-0007, index=3"},
+    {"ref": "T1", "field": "health", "value": "warn", "where": "index 3"},
+])
+def test_dotted_paths_and_compound_ids_are_accepted(adapter, gateway, scopes, fact):
+    d, run = gpu_run(adapter, gateway, scopes, fact)
+    [cause] = d.hypotheses
+    [evidence] = cause.supporting_evidence
+    assert evidence.statement.startswith("node=sim-gpu-node-0007, index=3: ")
+    assert "gpu:sim-gpu-node-0007/3" in cause.components
+    verify_run(run, scopes)
+
+
+@pytest.mark.parametrize("fact", [
+    {"ref": "T1", "field": "gpus.count", "value": 1},  # path does not end at the leaf's real path
+    {"ref": "T1", "field": "xid_events.count", "value": 1, "where": "sim-gpu-node-0007:2"},  # wrong GPU
+    {"ref": "T1", "field": "xid_events.count", "value": 1, "where": "sim-gpu-node-9999:3"},  # wrong node
+    {"ref": "T1", "field": "xid_events.count", "value": 2, "where": "sim-gpu-node-0007:3"},  # wrong value
+    {"ref": "T1", "field": "", "value": 1},
+])
+def test_paths_and_ids_still_have_to_match_the_data(adapter, gateway, scopes, fact):
+    d, _ = gpu_run(adapter, gateway, scopes, fact)
+    assert d.hypotheses == [] and "T1 has no" in d.discarded_proposals[0]
+
+
+def test_specialists_get_the_site_thresholds(adapter, gateway, scopes):
+    from hpc_agent.config import load_site_profile
+
+    profile = load_site_profile("example-pjm-site")
+    llm = FakeLLM({"storage": [calls("get_ost_usage"), answer(hypotheses=[])]})
+    run_diagnosis(adapter.load_incident("POC-STORAGE-001"), gateway, scopes, profile=profile, llm=llm)
+    system = next(messages[0]["content"] for domain, _, messages in llm.seen if domain == "storage")
+    assert f"used_pct >= {profile.storage_full_pct:g}" in system
+    assert f">= {profile.ost_imbalance_spread_pct:g}" in system and "example-pjm-site" in system
+
+
+def test_threshold_numbers_may_appear_in_model_text():
+    from hpc_agent.agents.llm_agents import site_thresholds
+    from hpc_agent.models.site import DEFAULT_PROFILE
+
+    assert "temperature_c >= 85" in site_thresholds(Domain.GPU, DEFAULT_PROFILE)
+    assert site_thresholds(Domain.NETWORK, DEFAULT_PROFILE) == "Site thresholds: none for this domain."

@@ -34,6 +34,18 @@ LLM_POST_HOC_CHANGES = [
     "**2026-10-22: scheduler category list.** The LLM scheduler agent's category list first omitted "
     "`application.crash` and `application.exit_code`, which the rule-based scheduler agent uses. The "
     "omission was noticed in the rule-based report and fixed before the runs reported here.",
+    "**2026-10-23: fact matcher.** Re-running POC-GPU-001 with qwen2.5:7b showed a grounded proposal "
+    "discarded because it cited `field: \"xid_events.count\"` with `where: \"sim-gpu-node-0007:3\"`, while "
+    "the matcher accepted only a leaf name and a single record ID. The matcher now also accepts a dotted "
+    "path that ends at the cited field (list indices ignored) and a compound ID whose every part "
+    "identifies the record. The value must still match the data exactly. This was found on these "
+    "cases, so results after it are not an independent test of it.",
+    "**2026-10-26: site thresholds in the specialist prompt.** After the 7B rerun, EVAL-STOR-002 showed "
+    "the model calling a 55-61% OST spread an imbalance; the rule-based agents apply the site profile's "
+    "thresholds, which the LLM agents had not been given. The specialist prompt now states the site "
+    "profile's thresholds for its domain (storage full and OST spread, GPU thermal limit), the same "
+    "values the rules use. No case-specific hints were added. This was found on these cases, so results "
+    "after it are not an independent test of it.",
 ]
 _DETERMINISTIC = "The agents are deterministic, so processing times say nothing about LLM latency."
 _LLM_DRIVEN = ("Triage and the specialist agents were driven by a local language model whose proposals passed "

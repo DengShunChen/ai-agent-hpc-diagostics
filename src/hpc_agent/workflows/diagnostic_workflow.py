@@ -154,7 +154,7 @@ def default_specialists(profile: SiteProfile, llm: ChatLLM | None = None) -> lis
     if llm is None:
         return rules
     domains = {a: d for d, a in AGENT_FOR_DOMAIN.items()}
-    return [LLMSpecialist(agent, domains[agent.name], llm) for agent in rules]
+    return [LLMSpecialist(agent, domains[agent.name], llm, profile) for agent in rules]
 
 
 async def run_diagnosis_async(

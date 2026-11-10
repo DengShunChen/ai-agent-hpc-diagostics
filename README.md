@@ -23,7 +23,7 @@ Asia, and is meant to grow into a Uvance AIOps customer proposal.
 
 | Goal | What exists now | What is still needed |
 |---|---|---|
-| Multi-agent root-cause analysis across network, storage and scheduler layers | Triage, storage/scheduler/network/GPU diagnosis, RCA Coordinator, **remediation agent**, all coordinated by Microsoft Agent Framework. Triage and the specialists can be **LLM-driven** (`HPC_AGENT_REASONING=llm`): the model picks tools and proposes; deterministic checks keep only grounded proposals | A model that beats the rules: on the synthetic cases, local 3B/7B models on CPU score well below the rules ([docs/evaluation-llm.md](docs/evaluation-llm.md)) |
+| Multi-agent root-cause analysis across network, storage and scheduler layers | Triage, storage/scheduler/network/GPU diagnosis, RCA Coordinator, **remediation agent**, all coordinated by Microsoft Agent Framework. Triage and the specialists can be **LLM-driven** (`HPC_AGENT_REASONING=llm`): the model picks tools and proposes; deterministic checks keep only grounded proposals | A model that beats the rules: on the synthetic cases, a local 7B model on CPU scores well below the rules ([docs/evaluation-llm.md](docs/evaluation-llm.md)) |
 | Operational safety | Human approval, no execution path, allowlisted read-only tools, runtime guards, hash-chained audit | Production security review |
 | Shorter fault localization (Business Impact) | `hpc-agent metrics` (workflow timings, override rate), [measurement protocol](docs/business-impact.md) | Baseline and pilot measurement. **No reduction is claimed.** |
 | Rollout across sites (Replicability) | Site profiles (`config/sites/`), per-site metrics, a single container image, the [site rollout guide](docs/site-replication.md), an offline **export importer** with a data contract and de-identification (`hpc-agent import-export`) | Each site's export procedure (security review); cases labelled by each site |
@@ -242,9 +242,11 @@ MODEL_PROVIDER=ollama MODEL_NAME=qwen2.5:7b HPC_AGENT_REASONING=llm PYTHONPATH=s
 - The RCA Coordinator and the remediation agent stay deterministic.
 
 Measured on the 13 synthetic cases on this CPU-only host ([docs/evaluation-llm.md](docs/evaluation-llm.md)):
-top-1 root cause 36% (7B) and 55% (3B) against 100% for the rules. Every kept proposal cited fetched
-data or an incident item, and the 7B run had no unsupported claims under the harness definition (3B
-had 2 grounded but wrong ones). A diagnosis takes 1–3 minutes. Until a model beats the rules
+qwen2.5:7b scored 36–55% top-1 root cause across runs (100% for the rules), and a one-line prompt
+change moved its results more than switching between 3B and 7B. Every kept proposal cited fetched data
+or an incident item, and the current runs had no unsupported claims under the harness definition (an
+earlier 3B run had 2 grounded but wrong ones). A diagnosis takes about 3 minutes with 7B. The next real
+test is a larger model (14B+) on a host with a GPU or more memory. Until a model beats the rules
 on independently labelled incidents, `rules` stays the recommended mode for review work.
 
 ## Local LLM explainer (optional)
@@ -405,8 +407,9 @@ Container properties:
   `HPC_AGENT_REASONING=llm` the model chooses tools and forms hypotheses, but local 3B/7B models
   on CPU score well below the rule-based agents on the synthetic cases, and the checks verify
   that evidence exists, not that the reasoning about it is right (a 3B run cited a real 83%
-  usage as a capacity problem). The fact matcher also rejects some grounded citations
-  (dotted field paths); see [docs/evaluation-llm.md](docs/evaluation-llm.md).
+  usage as a capacity problem). The fact matcher still rejects some grounded citations, for
+  example a record ID written as `sim-gpu-node-0007 GPU 3`. See
+  [docs/evaluation-llm.md](docs/evaluation-llm.md).
 - A small local model on CPU is slow (tens of seconds to minutes per explanation), and its
   output is often rejected by the grounding checks. That's by design: an unsupported
   explanation is never shown.
