@@ -1,0 +1,4 @@
+{
+  "class": "synthetic",
+  "note": "All fixtures and test_data in this repository are synthetic (sim-/SIM- identifiers). Read by ReadOnlyDataAdapter.data_class(); cloud models are allowed only for synthetic or de-identified imported data."
+}

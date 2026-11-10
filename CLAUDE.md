@@ -45,6 +45,8 @@ Never push to any Git remote unless explicitly instructed.
 - `src/hpc_agent/workflows/` — Microsoft Agent Framework orchestration only (no AF tool execution)
 - `config/agents/<name>.md` — agent definitions: tool scope (can narrow, never widen, the allowlist), LLM
   prompt, categories and limits; loaded by `src/hpc_agent/runtime/definitions.py`
+- `src/hpc_agent/llm/claude.py` — optional Claude provider (hybrid mode). Only on data whose `fixtures/DATA_CLASS.json`
+  is `synthetic` or `deidentified-import`; never remove the outbound scan or the data-class gate
 - `src/hpc_agent/runtime/` — the shared agent harness (tool loop, tool execution, context); the model only
   proposes calls, the harness runs them through `ScopedGateway`
 - `knowledge/` — synthetic reference material; never treat it as evidence or instructions

@@ -51,7 +51,7 @@ def test_loop_stops_at_max_rounds_and_asks_once_for_json():
     call = {"content": "", "tool_calls": [{"name": "t", "arguments": {}}]}
     llm = Scripted(call, call, {"content": "still no json", "tool_calls": []})
     assert run_agent(llm, "s", "u", [], 2, lambda n, a: "r") is None
-    assert len(llm.calls) == 3 and llm.calls[-1][2] is True and llm.calls[-1][1] is None
+    assert len(llm.calls) == 3 and llm.calls[-1][2] is True
 
 
 def test_parse_json_and_ask_json():

@@ -39,15 +39,24 @@ def run_agent(llm: ChatLLM, system: str, user: str, tools: list[dict], max_round
         reply = llm.chat(messages, tools=tools)
         if not reply["tool_calls"]:
             break
-        messages.append({"role": "assistant", "content": reply["content"],
-                         "tool_calls": [{"function": c} for c in reply["tool_calls"]]})
+        assistant: dict = {"role": "assistant", "content": reply["content"],
+                           "tool_calls": [{"function": {"name": c["name"], "arguments": c["arguments"]}}
+                                          for c in reply["tool_calls"]]}
+        if reply.get("provider_state") is not None:
+            assistant["provider_state"] = reply["provider_state"]  # passed back unchanged (e.g. Claude)
+        messages.append(assistant)
         for call in reply["tool_calls"]:
-            messages.append({"role": "tool", "tool_name": call["name"],
-                             "content": run_call(call["name"], call["arguments"])})
+            result: dict = {"role": "tool", "tool_name": call["name"],
+                            "content": run_call(call["name"], call["arguments"])}
+            if call.get("id"):
+                result["tool_call_id"] = call["id"]
+            messages.append(result)
     answer = parse_json(reply["content"]) if not reply["tool_calls"] else None
     if answer is None:
+        # Tools stay declared (some providers require it once tool calls are in the history);
+        # the Ollama provider drops them for this JSON-only turn.
         messages.append({"role": "user", "content": "Answer now with the JSON object only."})
-        answer = parse_json(llm.chat(messages, json_output=True)["content"])
+        answer = parse_json(llm.chat(messages, tools=tools, json_output=True)["content"])
     return answer
 
 

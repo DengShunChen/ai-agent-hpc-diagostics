@@ -109,6 +109,11 @@ class OllamaProvider:
 
     def chat(self, messages: list[dict], tools: list[dict] | None = None, json_output: bool = False) -> dict:
         """One model turn. Returns {"content": str, "tool_calls": [{"name": str, "arguments": dict}]}."""
+        # Keep only the fields Ollama understands; the harness may carry provider-specific ones.
+        messages = [{k: v for k, v in m.items() if k in ("role", "content", "tool_calls", "tool_name")}
+                    for m in messages]
+        if json_output:
+            tools = None  # the final JSON turn is answered without tools
         body: dict = {
             "model": self.model,
             "stream": False,
@@ -141,8 +146,12 @@ def provider_from_env() -> LLMProvider | None:
     name = os.environ.get("MODEL_PROVIDER", "").strip().lower()
     if not name:
         return None
+    if name == "anthropic":
+        from hpc_agent.llm.claude import claude_from_env
+
+        return claude_from_env()
     if name != "ollama":
-        raise LLMConfigError(f"unsupported MODEL_PROVIDER {name!r} (supported: ollama)")
+        raise LLMConfigError(f"unsupported MODEL_PROVIDER {name!r} (supported: ollama, anthropic)")
     return OllamaProvider(
         model=os.environ.get("MODEL_NAME") or DEFAULT_MODEL,
         endpoint=os.environ.get("MODEL_ENDPOINT") or DEFAULT_ENDPOINT,

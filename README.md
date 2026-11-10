@@ -223,7 +223,18 @@ presenter notes are in [docs/demo.md](docs/demo.md).
 
 ## LLM-driven agents (optional)
 
-Requires a local Ollama model; `qwen2.5:7b` or larger is recommended.
+Two model providers (hybrid): a local Ollama model (default; `qwen2.5:7b` or larger is recommended)
+or Claude through the official `anthropic` SDK. Claude is used only when selected, only on data whose
+`fixtures/DATA_CLASS.json` says `synthetic` (the POC data) or `deidentified-import` (written by
+`hpc-agent import-export`), and every request is scanned for credentials and identifiers before it
+leaves; a blocked request falls back to the rule-based agent. Claude requests are billed.
+
+```bash
+MODEL_PROVIDER=anthropic HPC_AGENT_REASONING=llm PYTHONPATH=src .venv/bin/python -m hpc_agent.main diagnose POC-SCHEDULER-001 --no-save
+```
+
+`MODEL_NAME` defaults to `claude-opus-5-5`, `HPC_AGENT_CLAUDE_EFFORT` to `high`; the SDK reads
+`ANTHROPIC_API_KEY` (or an `ant auth login` profile). Requests use server-side refusal fallback.
 
 ```bash
 MODEL_PROVIDER=ollama MODEL_NAME=qwen2.5:7b HPC_AGENT_REASONING=llm PYTHONPATH=src .venv/bin/python -m hpc_agent.main diagnose POC-SCHEDULER-001 --no-save

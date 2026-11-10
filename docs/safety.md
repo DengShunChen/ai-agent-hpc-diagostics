@@ -86,6 +86,20 @@ whose operation the policy denies are all rejected.
 - The `query` argument may contain only letters, digits, spaces and `._/-`, up to 200
   characters. Shell metacharacters, quotes, newlines and `..` are rejected.
 
+## Cloud model (Claude, optional)
+
+- Selected only with `MODEL_PROVIDER=anthropic`; the local Ollama provider stays the default.
+- Allowed only on data whose `fixtures/DATA_CLASS.json` says `synthetic` or `deidentified-import`
+  (written by `hpc-agent import-export` after its contract, pseudonymization and identifier checks).
+  The CLI, API server and evaluation refuse to start otherwise.
+- Every request is scanned just before it is sent (`llm/claude.py`): credential-like content, IP or
+  e-mail addresses, domain names or home paths block it, and the agent falls back to its rules. The
+  block message names the kind of content, never the value.
+- The model only proposes tool calls; the harness runs them through `ScopedGateway`, and the same
+  deterministic checks decide what a reviewer sees. Claude's earlier turns are passed back unchanged.
+- Credentials come from `ANTHROPIC_API_KEY` or an `ant auth login` profile. The container receives
+  the key by name from the operator's shell (`scripts/podman_run.sh`); it is never written to a file.
+
 ## Local LLM
 
 - **Local only.** The endpoint must be `http://` on localhost or `host.containers.internal`.

@@ -111,8 +111,9 @@ def test_bundle_must_match_the_requested_incident(tmp_path):
 
 def test_output_files_are_private(tmp_path):
     run(export(tmp_path, "SIM-X-010,,high,HPC,sim-node-1,,,,,"), tmp_path)
-    [path] = (tmp_path / "out").rglob("*.json")
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    paths = list((tmp_path / "out").rglob("*.json"))
+    assert len(paths) == 2  # the incident and the DATA_CLASS.json marker
+    assert all(stat.S_IMODE(p.stat().st_mode) == 0o600 for p in paths)
 
 
 def test_key_never_appears_in_output_or_report(tmp_path):

@@ -237,6 +237,10 @@ flowchart LR
 - **Rule-based agents** (`HPC_AGENT_REASONING=rules`, the default): the
   original deterministic agents. They are also the fallback, and the baseline the LLM
   agents are evaluated against.
+- **Model providers (hybrid)**: `llm/provider.py` (local Ollama, the default) and `llm/claude.py`
+  (Claude through the official `anthropic` SDK). Both implement the same `chat`/`generate` interface, so
+  the harness and the checks don't change. Claude is gated by the data class and an outbound scan (see
+  docs/safety.md).
 - **Local LLM explainer** (`llm/provider.py`, `llm/explainer.py`): an optional
   `LLMProvider` with a local-only `OllamaProvider` (standard-library HTTP, no new
   dependencies). It writes a Traditional Chinese explanation of an existing run.

@@ -35,6 +35,7 @@ def test_example_export_imports_every_incident(imported):
     assert report.rejected == {}
     files = sorted(str(p.relative_to(output)) for p in output.rglob("*.json"))
     assert files == [
+        "fixtures/DATA_CLASS.json",
         "fixtures/incidents/SIM-EXPORT-001.json",
         "fixtures/incidents/SIM-EXPORT-002.json",
         "fixtures/incidents/SIM-EXPORT-003.json",
@@ -44,6 +45,12 @@ def test_example_export_imports_every_incident(imported):
         "test_data/scheduler/SIM-EXPORT-001/node_status.json",
         "test_data/scheduler/SIM-EXPORT-003/job_status.json",
     ]
+
+
+def test_imported_root_is_marked_deidentified(imported):
+    output, _ = imported
+    assert ReadOnlyDataAdapter(output).data_class() == "deidentified-import"
+    assert ReadOnlyDataAdapter(PROJECT_ROOT).data_class() == "synthetic"
 
 
 def test_no_original_identifier_survives_anywhere(imported):

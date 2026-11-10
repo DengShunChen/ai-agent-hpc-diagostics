@@ -187,6 +187,8 @@ def _case_root(case: Case, workdir: Path, project_root: Path) -> tuple[ReadOnlyD
     incident = Incident.model_validate(case.incident)
     (root / "fixtures" / "incidents").mkdir(parents=True)
     (root / "fixtures" / "incidents" / f"{incident.incident_id}.json").write_text(json.dumps(case.incident))
+    if case.label_source.strip().lower().startswith("synthetic"):
+        (root / "fixtures" / "DATA_CLASS.json").write_text(json.dumps({"class": "synthetic"}))
     for key, payload in case.test_data.items():
         domain, dataset = key.split("/")
         path = root / "test_data" / domain / incident.incident_id / f"{dataset}.json"
@@ -252,6 +254,12 @@ def evaluate(
     with tempfile.TemporaryDirectory(prefix="hpc-agent-eval-") as tmp:
         for case in load_cases(cases_dir):
             adapter, incident = _case_root(case, Path(tmp), project_root)
+            if getattr(llm, "name", None) == "anthropic":
+                from hpc_agent.llm.claude import cloud_data_problem
+
+                problem = cloud_data_problem(adapter.data_class())
+                if problem:
+                    raise PermissionError(f"{case.case_id}: {problem}")
             run = run_diagnosis(incident, build_default_gateway(adapter), scopes, llm=llm)
             results.append(score(case, run))
     return results, summarize(results, approvals_log)

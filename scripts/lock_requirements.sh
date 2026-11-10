@@ -5,12 +5,20 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 report="$(mktemp)"
-trap 'rm -f "$report"' EXIT
+constraints="$(mktemp)"
+trap 'rm -f "$report" "$constraints"' EXIT
+# Keep every version already locked; only packages that are new get resolved fresh.
+# Delete containers/requirements.lock to re-resolve everything on purpose.
+if [ -f containers/requirements.lock ]; then
+    grep -oE '^[A-Za-z0-9_.-]+==[^ ]+' containers/requirements.lock > "$constraints" || true
+fi
 .venv/bin/python -m pip install --quiet --dry-run --ignore-installed --only-binary=:all: \
     --python-version 3.12 --implementation cp \
     --platform manylinux_2_28_x86_64 --platform manylinux_2_17_x86_64 --platform manylinux2014_x86_64 \
-    --report "$report" \
-    "pydantic>=2.7,<3" "pyyaml>=6,<7" "agent-framework-core==1.22.0" "fastapi==0.156.4" "uvicorn==0.54.0"
+    --report "$report" --constraint "$constraints" \
+    "pydantic>=2.7,<3" "pyyaml>=6,<7" "agent-framework-core==1.22.0" "fastapi==0.156.4" "uvicorn==0.54.0" \
+    "anthropic==2.3.0" "jiter==0.18.0"
+# New pins are releases at least two weeks old when added (anthropic and jiter: 2026-10-23).
 .venv/bin/python - "$report" > containers/requirements.lock <<'PY'
 import json, sys
 report = json.load(open(sys.argv[1]))

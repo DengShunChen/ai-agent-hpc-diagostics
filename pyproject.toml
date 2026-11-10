@@ -15,6 +15,8 @@ dependencies = [
     "agent-framework-core==1.22.0",
     "fastapi==0.156.4",
     "uvicorn==0.54.0",
+    # Optional Claude provider (MODEL_PROVIDER=anthropic); pinned to a release at least two weeks old.
+    "anthropic==2.3.0",
 ]
 
 [project.optional-dependencies]

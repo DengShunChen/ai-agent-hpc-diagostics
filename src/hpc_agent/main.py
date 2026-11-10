@@ -40,6 +40,15 @@ DECISIONS = {
 }
 
 
+def _cloud_problem(provider: object, adapter: ReadOnlyDataAdapter) -> str | None:
+    """Claude is allowed only on synthetic or de-identified imported data (fixtures/DATA_CLASS.json)."""
+    if getattr(provider, "name", None) != "anthropic":
+        return None
+    from hpc_agent.llm.claude import cloud_data_problem
+
+    return cloud_data_problem(adapter.data_class())
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hpc-agent")
     sub = parser.add_subparsers(dest="command")
@@ -170,8 +179,13 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         reasoning_llm = reasoning_llm_from_env()
+        explainer_llm = provider_from_env()
     except LLMConfigError as error:
         print(f"error: {error}", file=sys.stderr)
+        return 2
+    problem = _cloud_problem(reasoning_llm, adapter) or _cloud_problem(explainer_llm, adapter)
+    if problem and args.command in ("serve", "diagnose", "explain"):
+        print(f"error: {problem}", file=sys.stderr)
         return 2
     service = ApprovalService(default_state_dir(), adapter, gateway, reasoning_llm=reasoning_llm)
 
@@ -187,7 +201,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print("warning: HPC_AGENT_OPERATOR_TOKENS not set; all authenticated endpoints will refuse",
                   file=sys.stderr)
-        llm = provider_from_env()
+        llm = explainer_llm
         print(f"LLM explainer: {f'{llm.name}:{llm.model}' if llm else 'not configured'}", file=sys.stderr)
         print(f"Agent reasoning: {f'LLM ({reasoning_llm.name}:{reasoning_llm.model}), checked by rules' if reasoning_llm else 'rules'}",
               file=sys.stderr)
@@ -223,7 +237,7 @@ def main(argv: list[str] | None = None) -> int:
                 note = f" - {r.operator_comment}" if r.operator_comment else ""
                 print(f"{r.timestamp.isoformat()}  {r.status}{who}{note}")
         elif args.command == "explain":
-            llm = provider_from_env()
+            llm = explainer_llm
             if llm is None:
                 print("error: no LLM configured; set MODEL_PROVIDER=ollama (and MODEL_NAME, MODEL_ENDPOINT)",
                       file=sys.stderr)

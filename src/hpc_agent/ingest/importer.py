@@ -151,4 +151,9 @@ def import_export(
             for relative, data in prepared.items():
                 _write(output, relative, data)
         report.imported.append(incident_id)
+    if report.imported and not dry_run:
+        marker = output / "fixtures" / "DATA_CLASS.json"
+        if not marker.exists():
+            _write(output, "fixtures/DATA_CLASS.json",
+                   {"class": "deidentified-import", "by": "hpc-agent import-export", "adapter": adapter.name})
     return report

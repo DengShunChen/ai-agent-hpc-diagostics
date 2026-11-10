@@ -17,6 +17,7 @@ from hpc_agent.models.incident import INCIDENT_ID_PATTERN, Incident
 from hpc_agent.safety.secrets import assert_no_credentials
 
 ALLOWED_DIRS = ("fixtures", "test_data", "knowledge")
+DATA_CLASSES = ("synthetic", "deidentified-import")
 MAX_FILE_BYTES = 1_000_000
 _SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
@@ -89,6 +90,16 @@ class ReadOnlyDataAdapter:
         if incident.incident_id != incident_id:
             raise DataAccessError("fixture incident_id does not match its file name")
         return incident
+
+    def data_class(self) -> str | None:
+        """fixtures/DATA_CLASS.json: "synthetic" (the POC data) or "deidentified-import" (written by
+        hpc-agent import-export). None when absent or malformed. Cloud models are allowed only for these."""
+        try:
+            data = self.read_json("fixtures", "DATA_CLASS.json")
+        except (FileNotFoundError, DataAccessError, ValueError):
+            return None
+        value = data.get("class") if isinstance(data, dict) else None
+        return value if value in DATA_CLASSES else None
 
     def list_incident_ids(self) -> list[str]:
         directory = self._resolve("fixtures", "incidents")

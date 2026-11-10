@@ -22,6 +22,8 @@
 # explanations; with HPC_AGENT_REASONING=llm it also drives triage and the specialist agents
 # (default rules: see docs/evaluation-llm.md):
 #   MODEL_PROVIDER=ollama MODEL_NAME=qwen2.5:7b HPC_AGENT_REASONING=llm scripts/podman_run.sh
+# Or Claude (cloud; only for synthetic or de-identified imported data, see fixtures/DATA_CLASS.json):
+#   MODEL_PROVIDER=anthropic HPC_AGENT_REASONING=llm scripts/podman_run.sh   (ANTHROPIC_API_KEY set in the shell)
 # This adds a pasta mapping so the container can reach the host's loopback as
 # host.containers.internal. Note: that mapping exposes ALL host-loopback services to the
 # container, so it is only added when MODEL_PROVIDER is set.
@@ -44,7 +46,15 @@ done
 mkdir -p "$STATE"
 
 LLM_ARGS=()
-if [ -n "${MODEL_PROVIDER:-}" ]; then
+if [ "${MODEL_PROVIDER:-}" = "anthropic" ]; then
+    # Claude (hybrid mode): needs outbound HTTPS to the Anthropic API. The key is passed through
+    # from this shell's environment by name, never written on the command line or into a file.
+    : "${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in this shell to use MODEL_PROVIDER=anthropic}"
+    LLM_ARGS=(-e MODEL_PROVIDER -e ANTHROPIC_API_KEY
+              -e "MODEL_NAME=${MODEL_NAME:-claude-opus-5-5}"
+              -e "HPC_AGENT_CLAUDE_EFFORT=${HPC_AGENT_CLAUDE_EFFORT:-high}"
+              -e "HPC_AGENT_REASONING=${HPC_AGENT_REASONING:-rules}")
+elif [ -n "${MODEL_PROVIDER:-}" ]; then
     LLM_ARGS=(--network "pasta:--map-host-loopback,169.254.1.2"
               --add-host "host.containers.internal:169.254.1.2"
               -e "MODEL_PROVIDER=$MODEL_PROVIDER"
