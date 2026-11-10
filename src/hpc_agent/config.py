@@ -1,7 +1,8 @@
 """Configuration loading.
 
-config/agents.yaml can only *narrow* which registered gateway tools an agent may call;
-it cannot add tools to the gateway allowlist. Malformed config fails closed.
+Agent tool scopes come from the agent definitions (config/agents/<name>.md). A scope can only
+*narrow* which registered gateway tools an agent may call; it cannot add tools to the gateway
+allowlist. Malformed config fails closed.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from pydantic import ValidationError
 
 from hpc_agent.data_adapter import default_data_root
 from hpc_agent.models.site import SITE_ID_PATTERN, SiteProfile
+from hpc_agent.runtime.definitions import DefinitionError, load_definitions
 
 
 class ConfigError(ValueError):
@@ -22,18 +24,11 @@ class ConfigError(ValueError):
 
 
 def load_agent_tool_scopes(root: Path | None = None) -> dict[str, frozenset[str]]:
-    path = (root or default_data_root()) / "config" / "agents.yaml"
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    agents = data.get("agents") if isinstance(data, dict) else None
-    if not isinstance(agents, dict):
-        raise ConfigError("agents.yaml must contain an 'agents' mapping")
-    scopes: dict[str, frozenset[str]] = {}
-    for name, spec in agents.items():
-        tools = spec.get("tools", []) if isinstance(spec, dict) else None
-        if not isinstance(tools, list) or not all(isinstance(t, str) for t in tools):
-            raise ConfigError(f"agents.yaml: 'tools' for {name!r} must be a list of names")
-        scopes[name] = frozenset(tools)
-    return scopes
+    try:
+        definitions = load_definitions(root)
+    except (DefinitionError, yaml.YAMLError) as error:
+        raise ConfigError(str(error)) from None
+    return {name: frozenset(d.tools) for name, d in definitions.items()}
 
 
 def load_site_profile(site_id: str | None = None, root: Path | None = None) -> SiteProfile:

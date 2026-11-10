@@ -11,7 +11,7 @@ sites in East Asia) while keeping diagnosis, safety and metrics comparable acros
 | Evidence model, fact/hypothesis/missing-information separation, runtime guards | **Data adapters**: how the site's saved tool data is exported into `test_data/`-style read-only inputs |
 | Tool Gateway allowlist, default-deny policy, human approval, hash-chained audit | **Knowledge base**: the site's own de-identified SOPs, manuals and past incidents in `knowledge/` |
 | Evaluation metrics and their definitions; workflow metrics (`hpc-agent metrics`) | **Operator tokens**: issued per site; token files never leave the site |
-| Container image, built from the same hash-locked lockfile | **Agent tool scopes** (`config/agents.yaml`): may be narrowed, never widened |
+| Container image, built from the same hash-locked lockfile | **Agent tool scopes** (the `tools` list in `config/agents/<name>.md`): may be narrowed, never widened |
 
 A site profile can only tune *diagnostic thresholds*. It has no fields for the safety
 policy, tools, approval rules or execution. Unknown fields are rejected, every value is

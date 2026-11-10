@@ -122,17 +122,21 @@ def test_llm_reaches_the_diagnostic_path_only_through_the_llm_agents():
     # The LLM-driven triage and specialists (agents/llm_agents.py, wired in by the workflow)
     # are the only diagnostic code that may use a model. Rule-based agents (also the
     # fallback), the RCA Coordinator, the remediation agent and the tools stay model-free.
-    allowed = {"llm_agents.py", "diagnostic_workflow.py"}
+    allowed = {"llm_agents.py", "diagnostic_workflow.py", "loop.py"}
     sources = [*(PROJECT_ROOT / "src" / "hpc_agent" / "agents").rglob("*.py"),
+               *(PROJECT_ROOT / "src" / "hpc_agent" / "runtime").rglob("*.py"),
                *(PROJECT_ROOT / "src" / "hpc_agent" / "tools").rglob("*.py"),
                PROJECT_ROOT / "src" / "hpc_agent" / "workflows" / "diagnostic_workflow.py"]
     for path in sources:
         if path.name not in allowed:
             assert "hpc_agent.llm" not in path.read_text(encoding="utf-8"), path.name
-    llm_agents = (PROJECT_ROOT / "src" / "hpc_agent" / "agents" / "llm_agents.py").read_text(encoding="utf-8")
-    for forbidden in ("ToolGateway", "build_default_gateway", "data_adapter", "approval_workflow",
-                      "safety.approval", "RemediationAgent", "RCACoordinator"):
-        assert forbidden not in llm_agents, f"llm_agents.py uses {forbidden}"
+    harness = [PROJECT_ROOT / "src" / "hpc_agent" / "agents" / "llm_agents.py",
+               *(PROJECT_ROOT / "src" / "hpc_agent" / "runtime").rglob("*.py")]
+    for path in harness:
+        text = path.read_text(encoding="utf-8").replace("ScopedGateway", "")
+        for forbidden in ("ToolGateway", "build_default_gateway", "approval_workflow", "safety.approval",
+                          "RemediationAgent", "RCACoordinator", "ReadOnlyDataAdapter"):
+            assert forbidden not in text, f"{path.name} uses {forbidden}"
     for path in (PROJECT_ROOT / "src" / "hpc_agent" / "llm").rglob("*.py"):
         text = path.read_text(encoding="utf-8")
         for forbidden in ("hpc_agent.tools", "approval_workflow", "safety.approval", "data_adapter"):

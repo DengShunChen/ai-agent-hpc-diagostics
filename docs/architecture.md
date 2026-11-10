@@ -71,7 +71,7 @@ Rocky Linux 10
 | Scheduler Agent | `agents/scheduler.py` |
 | Evidence helpers, domain keyword signals | `agents/evidence.py` |
 | Per-agent ScopedGateway (scope ∩ allowlist, records every call) | `tools/gateway.py` |
-| Agent tool scopes | `config/agents.yaml`, `config.py` |
+| Agent definitions and tool scopes | `config/agents/*.md`, `runtime/definitions.py`, `config.py` |
 | TriageResult, DiagnosticRun | `models/triage.py`, `models/run.py` |
 | Agent Framework workflow + text report | `workflows/diagnostic_workflow.py` |
 

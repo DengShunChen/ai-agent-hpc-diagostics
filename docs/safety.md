@@ -49,11 +49,11 @@ whose operation the policy denies are all rejected.
 ## Agent data access
 
 - Each specialist gets a `ScopedGateway` that allows only the tools listed for it in
-  `config/agents.yaml`, and only if they're also in the gateway allowlist. Configuration can
+  their definition (`config/agents/<name>.md`), and only if they're also in the gateway allowlist. Configuration can
   narrow access but never widen it. An agent with no entry gets no tools.
 - Every call, including a denied one, is recorded as a `ToolInvocationRecord` with the agent,
   tool, result status, evidence reference and duration.
-- `agents.yaml` is parsed with `yaml.safe_load`, and malformed configuration raises an error.
+- Agent definitions are parsed with `yaml.safe_load`, and malformed configuration raises an error.
 - Agents restate saved values verbatim with their source path. Missing, null or wrongly
   typed fields (for example a percentage given as a string) are listed as missing
   information and never estimated.
@@ -120,7 +120,7 @@ whose operation the policy denies are all rejected.
 ## Remediation agent and site profiles
 
 - **Remediation agent.**
-  - It has no tools (an empty scope in `agents.yaml`, and a test checks the source never
+  - It has no tools (an empty scope in its definition, and a test checks the source never
     touches the gateway or data adapter), and it never executes anything.
   - Its proposals are fixed playbook text, and a test checks they contain no command
     syntax.

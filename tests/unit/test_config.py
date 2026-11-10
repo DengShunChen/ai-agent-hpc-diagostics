@@ -13,20 +13,46 @@ def test_repo_scopes(scopes):
     assert scopes["rca-coordinator"] == frozenset()
 
 
+GOOD = """---
+name: storage-agent
+description: "Storage"
+domain: storage
+tools: [get_ost_usage]
+---
+"""
+
+
 @pytest.mark.parametrize(
     "text",
-    ["[]", "agents: []", "agents:\n  storage-agent:\n    tools: get_ost_usage",
-     "agents:\n  storage-agent:\n    tools: [1, 2]", "agents:\n  storage-agent: oops"],
+    ["no frontmatter", "---\n[]\n---\n", GOOD.replace("tools: [get_ost_usage]", "tools: get_ost_usage"),
+     GOOD.replace("tools: [get_ost_usage]", "tools: [1, 2]"), GOOD.replace("name: storage-agent", "name: other-agent"),
+     GOOD.replace('description: "Storage"\n', ""), GOOD.replace("domain: storage", "domain: storage\nexecute: true"),
+     GOOD + "a prompt without an llm section"],
 )
-def test_malformed_config_fails_closed(tmp_path, text):
-    (tmp_path / "config").mkdir()
-    (tmp_path / "config" / "agents.yaml").write_text(text)
+def test_malformed_definitions_fail_closed(tmp_path, text):
+    (tmp_path / "config" / "agents").mkdir(parents=True)
+    (tmp_path / "config" / "agents" / "storage-agent.md").write_text(text)
+    with pytest.raises(ConfigError):
+        load_agent_tool_scopes(tmp_path)
+
+
+def test_missing_definitions_fail_closed(tmp_path):
     with pytest.raises(ConfigError):
         load_agent_tool_scopes(tmp_path)
 
 
 def test_yaml_tags_not_executed(tmp_path):
-    (tmp_path / "config").mkdir()
-    (tmp_path / "config" / "agents.yaml").write_text("agents: !!python/object/apply:os.getcwd []")
+    (tmp_path / "config" / "agents").mkdir(parents=True)
+    (tmp_path / "config" / "agents" / "storage-agent.md").write_text(
+        "---\nname: !!python/object/apply:os.getcwd []\n---\n")
     with pytest.raises(Exception):
         load_agent_tool_scopes(tmp_path)
+
+
+def test_definition_scopes_cannot_widen_the_allowlist(tmp_path, gateway):
+    from hpc_agent.tools.gateway import ScopedGateway
+
+    (tmp_path / "config" / "agents").mkdir(parents=True)
+    (tmp_path / "config" / "agents" / "storage-agent.md").write_text(GOOD.replace("[get_ost_usage]", "[get_ost_usage, run_shell]"))
+    scopes = load_agent_tool_scopes(tmp_path)
+    assert ScopedGateway(gateway, "storage-agent", scopes, []).allowed_tools == {"get_ost_usage"}

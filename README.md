@@ -118,7 +118,7 @@ metrics per site come from `hpc-agent metrics`.
 ## Repository structure
 
 ```
-config/            agents.yaml (per-agent tool scopes), app.yaml (documented settings)
+config/            agents/*.md (agent definitions: tool scopes, LLM prompt and limits), app.yaml
 src/hpc_agent/
   models/          Incident, AgentDiagnosis, RCAResult, AuditRecord, ApprovalRecord, ApprovalRequest,
                    TriageResult, DiagnosticRun
@@ -170,7 +170,7 @@ audit-data/        runtime state and audit logs (git-ignored)
 
 Copy `.env.example` to `.env` and fill it in locally. **Never commit `.env`.** Iteration 1 needs
 no configuration. `HPC_AGENT_DATA_ROOT` can point the data adapter at another data root.
-`config/agents.yaml` sets which gateway tools each agent may call. It can only narrow the
+Each agent's definition (`config/agents/<name>.md`) sets which gateway tools it may call. It can only narrow the
 gateway allowlist, never widen it.
 
 ## Running tests
