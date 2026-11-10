@@ -33,6 +33,8 @@ Every change below was made after looking at these cases and is disclosed in the
 | 2026-10-23 | 7b | + dotted paths / compound IDs in the fact matcher | 77% | 55% | 0% | 92% |
 | 2026-10-26 | 7b | + site thresholds in the specialist prompt (current) | 62% | 36% | 67% | 100% |
 | 2026-10-26 | 3b | same (current) | 77% | 36% | 33% | 50% |
+| 2026-11-10 | 7b | + shared harness (prompts byte-identical; results identical on all 13 cases) | 62% | 36% | 67% | 100% |
+| 2026-11-10 | 7b | + skills read on demand with `load_skill` (skills `6c693a464e18`) | 69% | 36% | 33% | 91% |
 
 ## What this shows
 
@@ -64,6 +66,19 @@ Every change below was made after looking at these cases and is disclosed in the
   compare fairly.
 - **Speed.** About 1 minute (3B) to 3 minutes (7B) per diagnosis on this CPU, against milliseconds for the
   rules.
+
+## Skills (2026-11-10)
+
+- Adding four skills, read on demand with `load_skill`, did not improve the 7B results: top-1 stayed at
+  36%, correct refusal fell from 67% to 33%, and one unsupported claim appeared (EVAL-STOR-003 led with
+  `storage.capacity`). Within the run-to-run spread seen above, this is no measurable change.
+- A traced 7B run on POC-SCHEDULER-001 shows why: the scheduler agent never called `load_skill`. It
+  used `search_manual` and `search_sop` instead. On-demand skills (the Claude Code pattern: an index in
+  the prompt, full text when needed) rely on the model deciding to read them, which this model does not.
+- EVAL-SCHED-001 still led with `scheduler.signal_termination` although the scheduler skill states how
+  to compare `elapsed` with `requested_walltime`; the model had not read it.
+- Not changed after seeing this: preloading the relevant skill into small models' prompts is a design
+  option, but it would be a change made on these cases and must be disclosed and re-run if applied.
 
 ## Next steps
 

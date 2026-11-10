@@ -104,6 +104,7 @@ class Summary(BaseModel):
     processing_ms_mean: float
     processing_ms_median: float
     processing_ms_max: float
+    skills_version: str | None = None  # fingerprint of skills/ for LLM-driven runs (frozen per evaluation)
 
 
 def load_cases(directory: Path) -> list[Case]:
@@ -262,4 +263,9 @@ def evaluate(
                     raise PermissionError(f"{case.case_id}: {problem}")
             run = run_diagnosis(incident, build_default_gateway(adapter), scopes, llm=llm)
             results.append(score(case, run))
-    return results, summarize(results, approvals_log)
+    summary = summarize(results, approvals_log)
+    if llm is not None:
+        from hpc_agent.runtime.skills import SkillLibrary
+
+        summary = summary.model_copy(update={"skills_version": SkillLibrary.load(default_data_root()).version()})
+    return results, summary

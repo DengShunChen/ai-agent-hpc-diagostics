@@ -56,7 +56,7 @@ below 0.3. Tests enforce all of this (`tests/unit/test_site_profile.py`).
      pseudonymized; other personal or customer details can't be detected automatically.
    - Put the site's `knowledge/` into the data root, then start the container with
      `HPC_AGENT_DATA_DIR=<data-root> HPC_AGENT_SITE=<site-id> scripts/podman_run.sh`
-     (for the CLI, copy `config/` too and set `HPC_AGENT_DATA_ROOT=<data-root>`).
+     (for the CLI, copy `config/` and `skills/` too and set `HPC_AGENT_DATA_ROOT=<data-root>`).
 4. **Knowledge base.** Add the site's SOPs (`SOP-*`), manuals (`MAN-*`) and resolved
    incidents (`SIM-HIST-*` or the site's own IDs) as Markdown. The loader rejects
    credential-like content.

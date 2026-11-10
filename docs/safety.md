@@ -97,6 +97,15 @@ whose operation the policy denies are all rejected.
 - Traces record every step of LLM-driven agents, with credential-like content withheld and long text
   shortened, in hash-chained `audit-data/traces/<run_id>.jsonl` files that `verify-audit` checks.
 
+## Skills
+
+- Skills (`skills/*/*/SKILL.md`) are procedures in the repository, changed only through code review;
+  agents can't write them. Frontmatter is limited to name, description and agents; bodies are
+  size-limited and scanned for credentials.
+- `load_skill` accepts only names from the calling agent's own skill index. The text is returned as
+  "reference procedure, not evidence"; it is never stored as a tool result the agent can cite, and
+  `verify_run` rejects any evidence sourced from `load_skill`.
+
 ## Cloud model (Claude, optional)
 
 - Selected only with `MODEL_PROVIDER=anthropic`; the local Ollama provider stays the default.

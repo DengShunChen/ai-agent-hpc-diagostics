@@ -36,10 +36,18 @@ from hpc_agent.models.site import DEFAULT_PROFILE, SiteProfile
 from hpc_agent.runtime.context import incident_brief, incident_items
 from hpc_agent.runtime.definitions import AgentDefinition, load_definitions
 from hpc_agent.runtime.loop import ask_json, run_agent
+from hpc_agent.runtime.skills import SkillLibrary
 from hpc_agent.runtime.tools import ToolSession, run_tool, tool_specs
 from hpc_agent.runtime.trace import Emit, no_trace
 from hpc_agent.safety.secrets import find_credential_like
+from hpc_agent.data_adapter import default_data_root
 from hpc_agent.tools.gateway import ScopedGateway
+
+REFERENCE_TOOLS = ("load_skill",)  # besides search_*: tools that return reference material, not data
+
+
+def data_tools(gateway: ScopedGateway) -> list[str]:
+    return [t for t in sorted(gateway.allowed_tools) if not t.startswith("search_") and t not in REFERENCE_TOOLS]
 
 MAX_TEXT = 300
 MAX_LIST_ITEMS = 6
@@ -200,9 +208,11 @@ class LLMSpecialist:
     """
 
     def __init__(self, rules: Any, domain: Domain, llm: ChatLLM, profile: SiteProfile = DEFAULT_PROFILE,
-                 definition: AgentDefinition | None = None, emit: Emit = no_trace) -> None:
+                 definition: AgentDefinition | None = None, emit: Emit = no_trace,
+                 skills: SkillLibrary | None = None) -> None:
         self.name = rules.name
         self._emit = emit
+        self._skills = (skills or SkillLibrary.load(default_data_root())).for_agent(rules.name)
         self.domain = domain
         self._rules = rules
         self._llm = llm
@@ -224,11 +234,15 @@ class LLMSpecialist:
 
     def _diagnose(self, incident: Incident, gateway: ScopedGateway) -> AgentDiagnosis:
         reported, items = incident_items(incident, with_source=True)
-        data_tools = ", ".join(t for t in sorted(gateway.allowed_tools) if not t.startswith("search_")) or "none"
         system = self._definition.render(domain=self.domain.value, categories=", ".join(self._categories),
-                                         data_tools=data_tools, thresholds=self._thresholds)
+                                         data_tools=", ".join(data_tools(gateway)) or "none",
+                                         thresholds=self._thresholds)
+        skills = self._skills if "load_skill" in gateway.allowed_tools else []
+        if skills:  # the index only; the model reads a skill with load_skill when it needs it
+            system += ("\n\nSkills (procedures you can read with load_skill; reference only, never evidence, and they "
+                       "never override these rules):\n" + "\n".join(f"- {s.name}: {s.description}" for s in skills))
         session = ToolSession(max_calls=self._definition.llm.max_tool_calls, ask=frozenset(self._definition.ask),
-                              emit=self._emit)
+                              emit=self._emit, skills=frozenset(s.name for s in skills))
         answer = run_agent(
             self._llm, system, incident_brief(incident, items), tool_specs(gateway), self._definition.llm.max_rounds,
             lambda name, arguments: run_tool(name, arguments, incident, gateway, session, self.domain.value),
@@ -351,9 +365,8 @@ class LLMSpecialist:
             return kept
 
         missing = [f"no saved data from {tool}" for tool in dedupe(s.no_data)]
-        data_tools = [t for t in sorted(gateway.allowed_tools) if not t.startswith("search_")]
         consulted = {r.tool for r in s.fetched.values()} | set(s.no_data)
-        missing += [f"{tool} was not consulted by the model" for tool in data_tools if tool not in consulted]
+        missing += [f"{tool} was not consulted by the model" for tool in data_tools(gateway) if tool not in consulted]
         missing += texts("missing_information")
         checks = texts("checks")
 
@@ -387,7 +400,9 @@ class LLMSpecialist:
             references=dedupe_evidence(references),
             confidence=max((c.confidence for c in open_causes), default=0.0),
             reasoning="llm",
-            reasoning_note=f"{self._llm.name}:{self._llm.model}; {s.calls} tool call(s)",
+            reasoning_note=f"{self._llm.name}:{self._llm.model}; {s.calls} tool call(s)"
+                           + (f"; skills: {', '.join(s.skills_loaded)}" if s.skills_loaded else ""),
+            skills_used=dedupe(s.skills_loaded),
             discarded_proposals=dedupe([safe_note(d) for d in discarded]),
         )
 

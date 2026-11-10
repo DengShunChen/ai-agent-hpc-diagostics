@@ -41,6 +41,7 @@ _TOOL_NAME = re.compile(r"^[a-z][a-z0-9_]{2,63}$")
 _ARG_PATTERNS = {
     "incident_id": re.compile(INCIDENT_ID_PATTERN),
     "query": re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._/-]{0,199}"),
+    "skill": re.compile(r"[a-z][a-z0-9-]{1,63}"),
 }
 DEFAULT_CALL_BUDGET = 40
 
@@ -216,11 +217,11 @@ def saved_data_tool(
 
 
 def build_default_gateway(adapter: ReadOnlyDataAdapter | None = None) -> ToolGateway:
-    from hpc_agent.tools import gpu_tools, knowledge_tools, network_tools, scheduler_tools, storage_tools
+    from hpc_agent.tools import gpu_tools, knowledge_tools, network_tools, scheduler_tools, skill_tools, storage_tools
 
     adapter = adapter or ReadOnlyDataAdapter()
     gateway = ToolGateway()
-    for module in (storage_tools, scheduler_tools, network_tools, gpu_tools, knowledge_tools):
+    for module in (storage_tools, scheduler_tools, network_tools, gpu_tools, knowledge_tools, skill_tools):
         for spec in module.tool_specs(adapter):
             gateway.register(spec)
     return gateway

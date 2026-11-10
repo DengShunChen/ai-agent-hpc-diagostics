@@ -142,6 +142,8 @@ class AgentDiagnosis(BaseModel):
     reasoning_note: str = ""  # model used, or why the rules were used instead
     # Model proposals that failed the deterministic checks, with the reason (never shown as findings).
     discarded_proposals: list[NonEmptyStr] = Field(default_factory=list)
+    # Skills (repository procedures) the agent read, as name@sha256-prefix; reference only, never evidence.
+    skills_used: list[NonEmptyStr] = Field(default_factory=list)
     human_approval_required: Literal[True] = True
 
     @model_validator(mode="after")

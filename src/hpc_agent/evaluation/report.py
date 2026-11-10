@@ -46,6 +46,11 @@ LLM_POST_HOC_CHANGES = [
     "profile's thresholds for its domain (storage full and OST spread, GPU thermal limit), the same "
     "values the rules use. No case-specific hints were added. This was found on these cases, so results "
     "after it are not an independent test of it.",
+    "**2026-11-10: skills.** LLM specialists can read repository skills (`skills/*/*/SKILL.md`) with "
+    "`load_skill`. The first four skills restate domain knowledge the rule-based agents already encode "
+    "(signal and walltime reading, capacity and imbalance against site thresholds, XID classes, link "
+    "health). They were written after seeing the LLM agents miss some of these cases, so results with "
+    "them are not an independent test; the report records the skills version used.",
 ]
 _DETERMINISTIC = "The agents are deterministic, so processing times say nothing about LLM latency."
 _LLM_DRIVEN = ("Triage and the specialist agents were driven by a local language model whose proposals passed "
@@ -149,6 +154,7 @@ def render_markdown(results: list[CaseResult], summary: Summary) -> str:
         f"| Diagnostic processing time (mean / median / max) | {summary.processing_ms_mean:.0f} / "
         f"{summary.processing_ms_median:.0f} / {summary.processing_ms_max:.0f} ms |",
         *_reasoning_rows(results),
+        *([f"| Skills version (fingerprint of skills/) | `{summary.skills_version}` |"] if summary.skills_version else []),
         "",
         "## Per-case results",
         "",

@@ -119,6 +119,7 @@ metrics per site come from `hpc-agent metrics`.
 
 ```
 config/            agents/*.md (agent definitions: tool scopes, LLM prompt and limits), app.yaml
+skills/            <domain>/<name>/SKILL.md (procedures LLM agents read with load_skill; reference only)
 src/hpc_agent/
   models/          Incident, AgentDiagnosis, RCAResult, AuditRecord, ApprovalRecord, ApprovalRequest,
                    TriageResult, DiagnosticRun
@@ -254,6 +255,13 @@ MODEL_PROVIDER=ollama MODEL_NAME=qwen2.5:7b HPC_AGENT_REASONING=llm PYTHONPATH=s
   (scope -> `deny`; tools listed under `ask:` in the agent's definition need a human and are never run
   during an unattended diagnosis; call limit) and PostToolUse hooks (a result with credential-like
   content is withheld from the model). Hooks are fixed code; configuration can't add one.
+- **Skills** (`skills/<domain>/<name>/SKILL.md`, Agent Skills style): diagnostic procedures kept in
+  the repository and reviewed like code. Only each agent's skill index (name + one-line description)
+  goes into its prompt; the model reads a skill with the `load_skill` tool when it needs one. A skill is
+  reference material: it can't be cited as evidence (the checks and `verify_run` refuse it) and can't
+  change the rules. Runs list the skills used (`name@sha`), and LLM evaluations record the skills
+  version. The first four restate what the rule-based agents encode (see the disclosure in
+  [docs/evaluation-llm.md](docs/evaluation-llm.md)).
 - **Traces**: each LLM-driven run stores what every agent did (prompt, model replies, each tool call
   with the permission decision and the arguments the model asked for versus the ones actually used,
   what the checks kept or discarded, fallbacks) in `audit-data/traces/<run_id>.jsonl`, hash-chained.

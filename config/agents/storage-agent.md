@@ -4,7 +4,7 @@
 name: storage-agent
 description: "Storage diagnosis: file systems, OSTs, capacity, health."
 domain: storage
-tools: [get_filesystem_usage, get_ost_usage, search_sop, search_incident_history, search_manual]
+tools: [get_filesystem_usage, get_ost_usage, search_sop, search_incident_history, search_manual, load_skill]
 llm:
   categories: [storage.capacity, storage.ost_imbalance, storage.health, storage.io_error]
   max_rounds: 4

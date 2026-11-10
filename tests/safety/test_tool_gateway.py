@@ -21,6 +21,7 @@ EXPECTED_TOOLS = (
     "get_network_status",
     "get_node_status",
     "get_ost_usage",
+    "load_skill",  # Phase C: reads a repository skill (reference only); read-only
     "search_incident_history",
     "search_manual",
     "search_sop",

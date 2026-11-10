@@ -4,7 +4,7 @@
 name: scheduler-agent
 description: "Scheduler diagnosis: jobs, nodes, exit codes, walltime."
 domain: scheduler
-tools: [get_job_status, get_node_status, search_sop, search_incident_history, search_manual]
+tools: [get_job_status, get_node_status, search_sop, search_incident_history, search_manual, load_skill]
 llm:
   categories: [scheduler.signal_termination, scheduler.walltime, node.unhealthy, application.crash, application.exit_code]
   max_rounds: 4

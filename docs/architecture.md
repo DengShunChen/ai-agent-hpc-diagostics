@@ -241,6 +241,10 @@ flowchart LR
   through PreToolUse hooks (scope, `ask` permission, call limit) and PostToolUse hooks (withhold
   credential-like results). The approval service stores each LLM-driven run's trace in a hash-chained
   log; the CLI, API and review page show it.
+- **Skills** (`runtime/skills.py`, `tools/skill_tools.py`, `skills/`): Agent Skills style procedures.
+  The harness adds each agent's skill index to its prompt; `load_skill` returns a skill's text as
+  reference material. Skills ship with the code (loaded from the code/config root, not an incident's
+  data root).
 - **Model providers (hybrid)**: `llm/provider.py` (local Ollama, the default) and `llm/claude.py`
   (Claude through the official `anthropic` SDK). Both implement the same `chat`/`generate` interface, so
   the harness and the checks don't change. Claude is gated by the data class and an outbound scan (see

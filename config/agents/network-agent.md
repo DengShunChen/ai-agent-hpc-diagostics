@@ -4,7 +4,7 @@
 name: network-agent
 description: "Network diagnosis: interfaces, links, bonds."
 domain: network
-tools: [get_network_status, search_sop, search_incident_history, search_manual]
+tools: [get_network_status, search_sop, search_incident_history, search_manual, load_skill]
 llm:
   categories: [network.link_down, network.link_flap, network.packet_errors, network.bond_degraded]
   max_rounds: 4

@@ -32,6 +32,8 @@ def verify_run(run: DiagnosticRun, scopes: Mapping[str, frozenset[str]]) -> None
             problems.append(f"knowledge presented as a fact: {item.source}")
         elif item.kind is EvidenceKind.TOOL_RESULT:
             _, tool, path = (item.source.split(":", 2) + ["", ""])[:3]
+            if tool == "load_skill":
+                problems.append(f"a skill presented as evidence: {item.source}")
             if (tool, path) not in succeeded:
                 problems.append(f"tool evidence without a matching successful call: {item.source}")
 

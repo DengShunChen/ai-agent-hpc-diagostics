@@ -4,7 +4,7 @@
 name: gpu-agent
 description: "GPU diagnosis: health, XID events, telemetry."
 domain: gpu
-tools: [get_gpu_health, search_sop, search_incident_history, search_manual]
+tools: [get_gpu_health, search_sop, search_incident_history, search_manual, load_skill]
 llm:
   categories: [gpu.hardware, gpu.application, gpu.thermal, gpu.interconnect, gpu.unexplained]
   max_rounds: 4
