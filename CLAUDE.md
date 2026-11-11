@@ -67,4 +67,9 @@ Never push to any Git remote unless explicitly instructed.
 - `src/hpc_agent/data_adapter.py` — the only reader of `fixtures/`, `test_data/`, `knowledge/`
 - `src/hpc_agent/ingest/` — offline import of exported files into a data root outside the repo; adapters
   parse files only (no network, no commands, no live systems); never weaken the contract or de-identification
+- `src/hpc_agent/simulate/` — offline simulated cluster (sim- names only, no hosts, no commands) writing raw logs and
+  command output with an injected root cause; labels go to a separate directory the import adapter never reads.
+  Don't tune agents on blind sets (`simulate --blind-seed`); disclose any change made after seeing one
+- `src/hpc_agent/ingest/raw_export.py` + `tools/log_tools.py` — raw logs parsed into a de-identified log index;
+  `get_log_lines` takes only a fixed source and plain keywords; log facts must quote the line exactly
 - `tests/{unit,safety,scenarios}/`

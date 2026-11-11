@@ -35,6 +35,8 @@ Every change below was made after looking at these cases and is disclosed in the
 | 2026-10-26 | 3b | same (current) | 77% | 36% | 33% | 50% |
 | 2026-11-10 | 7b | + shared harness (prompts byte-identical; results identical on all 13 cases) | 62% | 36% | 67% | 100% |
 | 2026-11-10 | 7b | + skills read on demand with `load_skill` (skills `6c693a464e18`) | 69% | 36% | 33% | 91% |
+| 2026-11-11 | Claude Opus 5.5 | same (skills `6c693a464e18`) | 69% | 45% | 67% | 100% |
+| 2026-11-11 | Claude Opus 5.5 | + existing T#/I# labels skipped by the number check | 85% | 45% | 67% | 100% |
 
 ## What this shows
 
@@ -79,6 +81,44 @@ Every change below was made after looking at these cases and is disclosed in the
   to compare `elapsed` with `requested_walltime`; the model had not read it.
 - Not changed after seeing this: preloading the relevant skill into small models' prompts is a design
   option, but it would be a change made on these cases and must be disclosed and re-run if applied.
+
+## Claude Opus 5.5 (2026-11-11)
+
+Run through the hybrid Claude provider (`MODEL_PROVIDER=anthropic`, `claude-opus-5-5`, effort high) on the same
+13 synthetic cases, under a spend cap (`HPC_AGENT_CLAUDE_BUDGET_USD=4.5`). Each run: 51 requests, about 75k
+input and 22k output tokens, about US$0.74, about 21 s per case. Full report:
+[evaluation-claude-opus.md](evaluation-claude-opus.md).
+
+| Metric | Rules | Opus 5.5 (first run) | Opus 5.5 (after label fix) | qwen2.5:7b (skills) |
+|---|---|---|---|---|
+| Correct domain classification | 100% | 69% | 85% | 69% |
+| Root cause accuracy, top-1 | 100% | 45% | 45% | 36% |
+| Outcome matches label | 100% | 54% | 62% | – |
+| Correct refusal to conclude | 100% | 67% | 67% | 33% |
+| Open hypotheses backed by tool evidence | 94% | 100% | 100% | 91% |
+| Required missing information identified | 100% | 10% | 10% | – |
+| Unsupported claim rate | 0% | 0% | 0% | – |
+| Model proposals discarded by the checks | – | 33 | 28 | – |
+
+- **The model is not the bottleneck; the checks are.** Opus reads the skills (7B never did), picks the
+  right tools and writes specific missing-information and check lists, yet top-1 is only 45%, because many
+  grounded proposals are discarded. Traced reruns of POC-SCHEDULER-001, POC-GPU-001 and POC-STORAGE-001
+  showed three causes:
+  1. *Reference labels read as numbers* (fixed, disclosed in the report): text citing `T1`/`T2` failed the
+     "every number appears in the data" check. Only labels that exist in the run are skipped now.
+  2. *Derived numbers*: Opus writes values it computed (signal 9 from exit code 137, "95 seconds" between
+     two timestamps). The check accepts only numbers present in the data. This is deliberate and unchanged:
+     a derived number can be wrong, and the reviewer must be able to find each number in the data.
+  3. *Record IDs in the fact matcher*: all three GPU cases still miss, as with 7B, because the GPU agent
+     cites `where: "sim-gpu-node-0007 GPU 3"`, which the matcher does not accept (see above). Unchanged.
+- **Run-to-run variation.** Top-1 stayed at 45% but on different cases: the second run gained EVAL-STOR-003
+  and POC-SCHEDULER-001 and lost EVAL-SCHED-001 (led with signal termination at 0.20) and EVAL-SCHED-002
+  (no hypothesis kept). One run per configuration can't separate the fix from this variation.
+- **Safety held in both runs.** 0 unsupported claims, no confirmed causes, every open hypothesis tool-backed,
+  no tool call outside an agent's scope, and the spend cap and outbound scan active on every request.
+- **Not yet shown:** that Claude beats the rules. The next disclosed changes worth testing are accepting
+  record IDs such as "GPU 3" in the matcher and letting the model cite a derived number together with the
+  data values it was computed from; both need another disclosed run (about US$0.75 each).
 
 ## Next steps
 

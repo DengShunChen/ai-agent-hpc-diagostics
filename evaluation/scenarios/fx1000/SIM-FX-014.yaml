@@ -1,0 +1,10 @@
+# Development scenario (Fujitsu TCS-style platform; approximated PJM/Tofu/FEFS formats): may be looked at while building the agents (unlike a blind set).
+scenario_id: SIM-FX-014
+seed: 2014
+platform: tcs-fx1000
+fault: ib_flap_lustre
+distractors: [drained_other_node]
+nodes: 48
+gpu_nodes: 12
+osts: 12
+description: "Tofu link flap cascade on a larger cluster."

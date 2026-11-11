@@ -7,7 +7,7 @@ timestamps must have a timezone. A missing value stays missing (None); nothing i
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
 
@@ -105,6 +105,25 @@ class GpuHealth(_Strict):
     gpus: list[Gpu] = Field(min_length=1)
 
 
+class LogLine(_Strict):
+    line: Annotated[int, Field(ge=1)]  # physical line number in the exported file
+    # The host that logged it (pseudonymized like every node name). None for the job manager's own log
+    # (slurmctld, pjm): the export doesn't name the controller host, and a daemon name pseudonymized like
+    # a host would look like a compute node.
+    node: Name | None = None
+    timestamp: AwareDatetime | None = None
+    text: Text
+
+
+class LogIndex(_Strict):
+    """One exported log source, line by line. Lines are kept verbatim (after de-identification);
+    nothing is summarized or interpreted here."""
+
+    source: Literal["slurmctld", "slurmd", "pjm", "syslog"]
+    lines: list[LogLine] = Field(max_length=6000)
+    unparsed: Count = 0  # lines that had no recognizable timestamp/host prefix (kept out, counted)
+
+
 # (domain, dataset) -> contract. These are the only datasets the Tool Gateway reads.
 DATASETS: dict[tuple[str, str], type[_Strict]] = {
     ("storage", "filesystem_usage"): FilesystemUsage,
@@ -113,4 +132,8 @@ DATASETS: dict[tuple[str, str], type[_Strict]] = {
     ("scheduler", "node_status"): NodeStatus,
     ("network", "network_status"): NetworkStatus,
     ("gpu", "gpu_health"): GpuHealth,
+    ("logs", "slurmctld"): LogIndex,
+    ("logs", "slurmd"): LogIndex,
+    ("logs", "pjm"): LogIndex,
+    ("logs", "syslog"): LogIndex,
 }

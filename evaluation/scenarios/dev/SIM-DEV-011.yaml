@@ -1,0 +1,6 @@
+# Development scenario: may be looked at while building the agents (unlike a blind set).
+scenario_id: SIM-DEV-011
+seed: 1011
+fault: ost_imbalance
+distractors: [other_job_oom]
+description: "Two OSTs nearly full while the file system overall has space."

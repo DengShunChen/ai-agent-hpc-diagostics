@@ -15,7 +15,10 @@ thinking blocks. Credentials come from the SDK's usual sources (ANTHROPIC_API_KE
 
 from __future__ import annotations
 
+import fcntl
+import json
 import os
+from pathlib import Path
 from typing import Any
 
 from hpc_agent.ingest.deidentify import find_identifiers
@@ -27,11 +30,17 @@ DEFAULT_EFFORT = "high"
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 MAX_TOKENS = 16000
 CLOUD_DATA_CLASSES = ("synthetic", "deidentified-import")
+# USD per million tokens (input, output), standard first-party rates; used for the spend cap.
+PRICES = {"claude-opus-5-5": (4.00, 20.00), "claude-sonnet-5-5": (2.00, 10.00), "claude-haiku-5-5": (0.10, 0.50)}
 _FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
 
 class OutboundBlockedError(LLMUnavailableError):
     """A request was not sent because it may carry sensitive or identifying data."""
+
+
+class BudgetExceededError(LLMUnavailableError):
+    """The spend cap was reached; no further requests are sent (agents fall back to rules)."""
 
 
 def cloud_data_problem(data_class: str | None) -> str | None:
@@ -116,9 +125,16 @@ def to_claude_messages(messages: list[dict]) -> tuple[str, list[dict]]:
 class ClaudeProvider:
     name = "anthropic"
 
-    def __init__(self, model: str = DEFAULT_CLAUDE_MODEL, effort: str = DEFAULT_EFFORT, client: Any = None) -> None:
+    def __init__(self, model: str = DEFAULT_CLAUDE_MODEL, effort: str = DEFAULT_EFFORT, client: Any = None,
+                 budget_usd: float | None = None, ledger: Path | None = None) -> None:
         if not model.startswith("claude-"):
             raise LLMConfigError(f"not a Claude model id: {model!r}")
+        if budget_usd is not None and model not in PRICES:
+            raise LLMConfigError(f"no price known for {model!r}; a spend cap needs one of {sorted(PRICES)}")
+        self.budget_usd = budget_usd
+        self.usage = {"requests": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
+        # Spend across runs (the cap applies to the total, not just this process).
+        self.ledger = ledger
         if effort not in EFFORTS:
             raise LLMConfigError(f"effort must be one of {EFFORTS}")
         if client is None:
@@ -129,7 +145,48 @@ class ClaudeProvider:
         self.effort = effort
         self._client = client
 
+    def _record_usage(self, response: Any) -> None:
+        usage = getattr(response, "usage", None)
+        tokens_in = (getattr(usage, "input_tokens", 0) or 0) + (getattr(usage, "cache_creation_input_tokens", 0) or 0) \
+            + (getattr(usage, "cache_read_input_tokens", 0) or 0)
+        tokens_out = getattr(usage, "output_tokens", 0) or 0
+        price_in, price_out = PRICES.get(self.model, (0.0, 0.0))
+        self.usage["requests"] += 1
+        self.usage["input_tokens"] += tokens_in
+        self.usage["output_tokens"] += tokens_out
+        cost = (tokens_in * price_in + tokens_out * price_out) / 1_000_000
+        self.usage["cost_usd"] += cost
+        if self.ledger is not None:
+            self._ledger_add(cost)
+
+    def _ledger_total(self) -> float:
+        if self.ledger is None or not self.ledger.exists():
+            return 0.0
+        try:
+            return float(json.loads(self.ledger.read_text(encoding="utf-8")).get("cost_usd", 0.0))
+        except (ValueError, OSError, AttributeError):
+            raise BudgetExceededError("spend ledger unreadable; refusing to send (fix or remove it by hand)") from None
+
+    def _ledger_add(self, cost: float) -> None:
+        self.ledger.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(self.ledger, os.O_RDWR | os.O_CREAT, 0o600)
+        with os.fdopen(fd, "r+", encoding="utf-8") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            raw = handle.read()
+            data = json.loads(raw) if raw.strip() else {"cost_usd": 0.0, "requests": 0}
+            data["cost_usd"] = float(data.get("cost_usd", 0.0)) + cost
+            data["requests"] = int(data.get("requests", 0)) + 1
+            handle.seek(0)
+            handle.truncate()
+            handle.write(json.dumps(data))
+
+    def spent_usd(self) -> float:
+        """Total spend the cap counts: the ledger's total when there is one, else this process."""
+        return self._ledger_total() if self.ledger is not None else self.usage["cost_usd"]
+
     def _send(self, system: str, messages: list[dict], tools: list[dict]) -> Any:
+        if self.budget_usd is not None and self.spent_usd() >= self.budget_usd:
+            raise BudgetExceededError(f"Claude spend cap reached (${self.spent_usd():.2f} of ${self.budget_usd:.2f})")
         # Assistant turns are Claude's own earlier output; everything else is checked before it leaves.
         problems = outbound_problems([system, tools, [m for m in messages if m["role"] == "user"]])
         if problems:
@@ -146,6 +203,7 @@ class ClaudeProvider:
             kwargs["tools"] = tools
         try:
             response = self._client.beta.messages.create(**kwargs)
+            self._record_usage(response)
         except (anthropic.APIConnectionError, anthropic.APIStatusError, anthropic.CredentialsError) as error:
             raise LLMUnavailableError(f"Claude request failed: {type(error).__name__}") from None
         if response.stop_reason == "refusal":
@@ -170,9 +228,17 @@ class ClaudeProvider:
 
 
 def claude_from_env() -> ClaudeProvider:
+    budget = os.environ.get("HPC_AGENT_CLAUDE_BUDGET_USD")
+    try:
+        budget_usd = float(budget) if budget else None
+    except ValueError:
+        raise LLMConfigError("HPC_AGENT_CLAUDE_BUDGET_USD must be a number") from None
+    ledger = os.environ.get("HPC_AGENT_CLAUDE_LEDGER") or str(Path.home() / ".config" / "hpc-agent" / "claude-spend.json")
     return ClaudeProvider(
         model=os.environ.get("MODEL_NAME") or DEFAULT_CLAUDE_MODEL,
         effort=(os.environ.get("HPC_AGENT_CLAUDE_EFFORT") or DEFAULT_EFFORT).strip().lower(),
+        budget_usd=budget_usd,
+        ledger=Path(ledger) if budget_usd is not None else None,
     )
 
 

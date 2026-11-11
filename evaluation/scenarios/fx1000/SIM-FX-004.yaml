@@ -1,0 +1,7 @@
+# Development scenario (Fujitsu TCS-style platform; approximated PJM/Tofu/FEFS formats): may be looked at while building the agents (unlike a blind set).
+scenario_id: SIM-FX-004
+seed: 2004
+platform: tcs-fx1000
+fault: admin_cancel
+distractors: [drained_other_node, lustre_reconnects]
+description: "Root cancelled the job; unrelated node drained for maintenance."

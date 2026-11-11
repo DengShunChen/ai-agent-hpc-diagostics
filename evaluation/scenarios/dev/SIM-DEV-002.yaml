@@ -1,0 +1,6 @@
+# Development scenario: may be looked at while building the agents (unlike a blind set).
+scenario_id: SIM-DEV-002
+seed: 1002
+fault: segfault
+distractors: [old_correctable_ecc, drained_other_node]
+description: "Application segfault; old correctable ECC errors on the same node."

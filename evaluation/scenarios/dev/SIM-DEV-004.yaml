@@ -1,0 +1,6 @@
+# Development scenario: may be looked at while building the agents (unlike a blind set).
+scenario_id: SIM-DEV-004
+seed: 1004
+fault: admin_cancel
+distractors: [drained_other_node, lustre_reconnects]
+description: "Root cancelled the job; unrelated node drained for maintenance."

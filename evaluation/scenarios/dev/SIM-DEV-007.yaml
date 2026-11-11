@@ -1,0 +1,6 @@
+# Development scenario: may be looked at while building the agents (unlike a blind set).
+scenario_id: SIM-DEV-007
+seed: 1007
+fault: gpu_xid48
+distractors: [other_job_oom]
+description: "GPU double-bit ECC error."

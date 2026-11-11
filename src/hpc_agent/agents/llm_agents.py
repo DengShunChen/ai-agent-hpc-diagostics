@@ -61,7 +61,8 @@ _COMMANDS = re.compile(
 )
 _CONFIRMED = re.compile(r"\b(confirmed|definitely|certainly|proven|the root cause is)\b", re.IGNORECASE)
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
-_CONTEXT_KEYS = ("filesystem", "ost", "job_id", "node", "interface", "index")
+_REFERENCE = re.compile(r"\b[TI]\d+\b")  # labels the prompt itself asks for: T# tool results, I# incident items
+_CONTEXT_KEYS = ("filesystem", "ost", "job_id", "node", "interface", "index", "line")  # line: a log line number
 _TIME_KEYS = ("timestamp", "state_changed_at", "last_change", "end_time", "collected_at")
 WITHHELD = "a proposal was withheld (SENSITIVE INFORMATION DETECTED AND NOT PROCESSED.)"
 
@@ -167,8 +168,12 @@ def components_of(leaf: Leaf) -> list[str]:
     return out
 
 
-def text_problem(text: str, allowed_numbers: set[str]) -> str | None:
-    """Why a piece of model text can't be shown to a reviewer, or None."""
+def text_problem(text: str, allowed_numbers: set[str], references: frozenset[str] = frozenset()) -> str | None:
+    """Why a piece of model text can't be shown to a reviewer, or None.
+
+    `references` are the T#/I# labels that exist in this run; they are labels, not quantities, so
+    their digits are not checked as numbers. A label that doesn't exist is still checked (and fails).
+    """
     if len(text) > MAX_TEXT:
         return "text too long"
     if _COMMANDS.search(text):
@@ -177,7 +182,8 @@ def text_problem(text: str, allowed_numbers: set[str]) -> str | None:
         return "claims a confirmed cause"
     if find_credential_like(text):
         return "credential-like content"
-    unknown = [n for n in _NUMBER.findall(text) if n not in allowed_numbers]
+    scanned = _REFERENCE.sub(lambda m: " " if m.group(0) in references else m.group(0), text)
+    unknown = [n for n in _NUMBER.findall(scanned) if n not in allowed_numbers]
     if unknown:
         return f"numbers not found in the data: {', '.join(unknown[:3])}"
     return None
@@ -278,6 +284,7 @@ class LLMSpecialist:
         corpus += " " + incident.incident_id + " " + (incident.node or "") + " " + (incident.job_id or "")
         corpus += " " + (incident.timestamp.isoformat() if incident.timestamp else "") + " " + self._thresholds
         allowed_numbers = set(_NUMBER.findall(corpus))
+        labels = frozenset(s.fetched) | frozenset(f"I{i}" for i in range(1, len(reported) + 1))
         evidence: list[Evidence] = []
         causes: list[ProbableCause] = []
         components: list[str] = []
@@ -294,7 +301,7 @@ class LLMSpecialist:
                 return
             cause = " ".join(raw["cause"].split())
             label = f"'{cause[:80]}'"
-            problem = text_problem(cause, allowed_numbers)
+            problem = text_problem(cause, allowed_numbers, labels)
             if problem == "credential-like content":
                 discarded.append(WITHHELD)
                 return
@@ -355,7 +362,7 @@ class LLMSpecialist:
         def texts(key: str) -> list[str]:
             kept = []
             for text in _strings(answer.get(key))[:MAX_LIST_ITEMS]:
-                problem = text_problem(text, allowed_numbers)
+                problem = text_problem(text, allowed_numbers, labels)
                 if problem == "credential-like content":
                     discarded.append(WITHHELD)
                 elif problem:
@@ -372,7 +379,7 @@ class LLMSpecialist:
 
         finding = answer.get("finding") if isinstance(answer.get("finding"), str) else ""
         finding = " ".join(finding.split())
-        problem = text_problem(finding, allowed_numbers) if finding else None
+        problem = text_problem(finding, allowed_numbers, labels) if finding else None
         if problem:
             discarded.append(f"finding: {problem}")
             finding = ""

@@ -1,0 +1,6 @@
+# Development scenario: may be looked at while building the agents (unlike a blind set).
+scenario_id: SIM-DEV-006
+seed: 1006
+fault: gpu_xid79
+distractors: [lustre_reconnects, drained_other_node]
+description: "GPU fell off the bus."

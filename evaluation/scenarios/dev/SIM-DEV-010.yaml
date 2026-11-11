@@ -1,0 +1,6 @@
+# Development scenario: may be looked at while building the agents (unlike a blind set).
+scenario_id: SIM-DEV-010
+seed: 1010
+fault: ost_full
+distractors: [recovered_link_flap, lustre_reconnects]
+description: "One OST full; write failed with ENOSPC."

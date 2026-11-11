@@ -1,0 +1,6 @@
+# Development scenario: may be looked at while building the agents (unlike a blind set).
+scenario_id: SIM-DEV-008
+seed: 1008
+fault: gpu_xid13_app
+distractors: [other_node_xid13, recovered_link_flap]
+description: "Application-caused GPU exception (illegal address)."

@@ -51,10 +51,16 @@ LLM_POST_HOC_CHANGES = [
     "(signal and walltime reading, capacity and imbalance against site thresholds, XID classes, link "
     "health). They were written after seeing the LLM agents miss some of these cases, so results with "
     "them are not an independent test; the report records the skills version used.",
+    "**2026-11-11: reference labels in the number check.** The first Claude Opus 5.5 run discarded model text "
+    "that cited tool results as T1/T2, because the check that every number in model text appears in the data "
+    "read the digits in those labels as numbers. Labels that exist in the run (fetched T# results, incident "
+    "items I#) are now skipped by that check; a label that doesn't exist, and every other number, is still "
+    "checked. This was found on these cases, so results after it are not an independent test of it.",
 ]
 _DETERMINISTIC = "The agents are deterministic, so processing times say nothing about LLM latency."
-_LLM_DRIVEN = ("Triage and the specialist agents were driven by a local language model whose proposals passed "
-               "deterministic checks; processing times are model inference times on this hardware.")
+_LLM_DRIVEN = ("Triage and the specialist agents were driven by a language model (local, or a cloud API when "
+               "configured) whose proposals passed deterministic checks; processing times include model "
+               "inference or API round trips.")
 
 
 def uses_llm(results: list[CaseResult]) -> bool:

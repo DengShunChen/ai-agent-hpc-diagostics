@@ -17,7 +17,9 @@
     hpc-agent explain RUN-ID [--operator NAME]        local-LLM explanation of a run (MODEL_PROVIDER=ollama)
     hpc-agent metrics [--json]                        workflow timings per site (not MTTR)
     hpc-agent compare-pilot FILE.csv [--min-n 10]     baseline vs assisted localization time / MTTR
-    hpc-agent import-export DIR --output DATA_ROOT [--dry-run]   validate + de-identify a site's CSV export
+    hpc-agent import-export DIR --output DATA_ROOT [--adapter csv|raw] [--dry-run]   validate + de-identify an export
+    hpc-agent simulate (--scenarios DIR | --blind-seed N --count K) --output DIR   simulated logs, injected faults
+    hpc-agent evaluate --scenarios DIR [--reasoning llm]   score simulated scenarios (DIR from simulate)
 
 Decisions are recorded only; nothing is ever executed. On the CLI, --operator is an asserted
 identity; the HTTP API instead derives the operator from an authenticated bearer token.
@@ -51,6 +53,15 @@ def _cloud_problem(provider: object, adapter: ReadOnlyDataAdapter) -> str | None
     return cloud_data_problem(adapter.data_class())
 
 
+def _print_spend(*providers: object) -> None:
+    """Claude token use and estimated cost for this process (and the ledger total, if any)."""
+    for provider in {id(p): p for p in providers if getattr(p, "name", None) == "anthropic"}.values():
+        u = provider.usage
+        total = f", total spent ${provider.spent_usd():.2f} of ${provider.budget_usd:.2f} cap" if provider.budget_usd else ""
+        print(f"Claude {provider.model}: {u['requests']} request(s), {u['input_tokens']} in / {u['output_tokens']} out "
+              f"tokens, about ${u['cost_usd']:.4f} this run{total}", file=sys.stderr)
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hpc-agent")
     sub = parser.add_subparsers(dest="command")
@@ -74,6 +85,14 @@ def _parser() -> argparse.ArgumentParser:
     imp.add_argument("export_dir", type=Path)
     imp.add_argument("--output", type=Path, required=True, help="new data root, outside the repository")
     imp.add_argument("--dry-run", action="store_true", help="validate and report only; write nothing")
+    imp.add_argument("--adapter", choices=("csv", "raw"), default="csv",
+                     help="csv: CSV files (ingest/csv_export.py); raw: logs + command output (ingest/raw_export.py)")
+    sim = sub.add_parser("simulate", help="generate simulated cluster logs with injected root causes")
+    group = sim.add_mutually_exclusive_group(required=True)
+    group.add_argument("--scenarios", type=Path, help="directory of scenario YAML files (e.g. evaluation/scenarios/dev)")
+    group.add_argument("--blind-seed", type=int, help="draw a blind set at random from the fault catalog")
+    sim.add_argument("--count", type=int, default=20, help="blind set size")
+    sim.add_argument("--output", type=Path, required=True, help="new directory outside the repository")
     explain = sub.add_parser("explain", help="ask the local LLM to explain a run's evidence")
     explain.add_argument("run_id")
     explain.add_argument("--operator", default=None)
@@ -85,6 +104,8 @@ def _parser() -> argparse.ArgumentParser:
     token.add_argument("--tokens-file", required=True, type=Path)
     evaluate = sub.add_parser("evaluate", help="run the labelled evaluation cases")
     evaluate.add_argument("--cases", type=Path, default=None, help="default: evaluation/cases")
+    evaluate.add_argument("--scenarios", type=Path, default=None,
+                          help="a directory written by `hpc-agent simulate` (export/ and labels/)")
     evaluate.add_argument("--approvals-log", type=Path, default=None,
                           help="approvals.jsonl with real human decisions (for the override rate)")
     evaluate.add_argument("--output", type=Path, default=None, help="write the Markdown report here")
@@ -126,8 +147,11 @@ def main(argv: list[str] | None = None) -> int:
         from hpc_agent.ingest.deidentify import DeidentificationError, Pseudonymizer
         from hpc_agent.ingest.importer import ExportImportError, import_export
 
+        from hpc_agent.ingest.raw_export import RawExportAdapter
+
         try:
-            report = import_export(CsvExportAdapter(args.export_dir), args.output, Pseudonymizer.from_env(),
+            export = (RawExportAdapter if args.adapter == "raw" else CsvExportAdapter)(args.export_dir)
+            report = import_export(export, args.output, Pseudonymizer.from_env(),
                                    forbidden_root=adapter.root, dry_run=args.dry_run)
         except (ExportImportError, DeidentificationError) as error:
             print(f"error: {error}", file=sys.stderr)
@@ -137,6 +161,37 @@ def main(argv: list[str] | None = None) -> int:
             print(f"next: put the site's knowledge/ into {args.output}, then start the container with "
                   f"HPC_AGENT_DATA_DIR={args.output} (see docs/pilot-runbook.md)")
         return 1 if report.rejected else 0
+
+    if args.command == "simulate":
+        from hpc_agent.simulate.render import generate
+        from hpc_agent.simulate.scenario import load_scenarios, random_scenarios
+
+        output = args.output.resolve()
+        if output.is_relative_to(adapter.root.resolve()):
+            print("error: --output must be outside the repository (generated data is not committed)", file=sys.stderr)
+            return 2
+        if output.exists() and any(output.iterdir()):
+            print("error: --output must be a new or empty directory", file=sys.stderr)
+            return 2
+        if args.scenarios:
+            scenarios = load_scenarios(args.scenarios)
+        else:
+            if not 1 <= args.count <= 200:
+                print("error: --count must be 1-200", file=sys.stderr)
+                return 2
+            scenarios = random_scenarios(args.blind_seed, args.count)
+        from hpc_agent.evaluation.scenarios import write_name_map
+
+        for scenario in scenarios:
+            labels = generate(scenario, output)
+            write_name_map(output, scenario.scenario_id)
+            # A blind set prints no fault names: whoever tunes the agents should not see them.
+            print(f"{scenario.scenario_id}: {labels.total_lines} log lines"
+                  + ("" if args.blind_seed is not None else f", fault {scenario.fault}"))
+        print(f"export: {output / 'export'}  labels: {output / 'labels'} (keep labels away from the agents)")
+        print(f"names: {output / 'names'} (simulated name -> pseudonym, for drills; see evaluation/drill/README.md)")
+        print(f"next: hpc-agent evaluate --scenarios {output}")
+        return 0
 
     if args.command == "evaluate":
         from hpc_agent.evaluation.harness import evaluate as run_evaluation
@@ -154,9 +209,21 @@ def main(argv: list[str] | None = None) -> int:
             if llm is None:
                 print("error: --reasoning llm needs MODEL_PROVIDER=ollama and MODEL_NAME", file=sys.stderr)
                 return 2
-        results, summary = run_evaluation(args.cases or adapter.root / "evaluation" / "cases",
-                                          approvals_log=args.approvals_log, llm=llm)
-        report = render_markdown(results, summary)
+        log_section = ""
+        if args.scenarios:
+            from hpc_agent.evaluation.scenarios import evaluate_scenarios, render_log_section
+
+            results, summary, logs = evaluate_scenarios(args.scenarios, llm=llm)
+            if llm is not None:
+                from hpc_agent.runtime.skills import SkillLibrary
+
+                summary = summary.model_copy(update={"skills_version": SkillLibrary.load(adapter.root).version()})
+            log_section = "\n" + render_log_section(logs)
+        else:
+            results, summary = run_evaluation(args.cases or adapter.root / "evaluation" / "cases",
+                                              approvals_log=args.approvals_log, llm=llm)
+        _print_spend(llm)
+        report = render_markdown(results, summary) + log_section
         if args.output:
             args.output.write_text(report, encoding="utf-8")
         if args.json:
@@ -215,6 +282,7 @@ def main(argv: list[str] | None = None) -> int:
                       file=sys.stderr)
             run = (run_diagnosis(incident, gateway, llm=reasoning_llm) if args.no_save
                    else service.diagnose(incident))
+            _print_spend(reasoning_llm)
             print(render_report(run))
             if not args.no_save:
                 print(f"\nRun {run.run_id} recorded: {service.status(run.run_id).status}")

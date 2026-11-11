@@ -1,0 +1,7 @@
+# Development scenario (Fujitsu TCS-style platform; approximated PJM/Tofu/FEFS formats): may be looked at while building the agents (unlike a blind set).
+scenario_id: SIM-FX-003
+seed: 2003
+platform: tcs-fx1000
+fault: walltime
+distractors: [recovered_link_flap]
+description: "Job reached its time limit; a Tofu link on a job node flapped hours earlier."

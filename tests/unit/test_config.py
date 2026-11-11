@@ -6,6 +6,7 @@ from hpc_agent.config import ConfigError, load_agent_tool_scopes
 def test_repo_scopes(scopes):
     assert scopes["triage-agent"] == frozenset()
     knowledge = {"search_sop", "search_incident_history", "search_manual", "load_skill"}
+    knowledge |= {"get_log_lines"}  # every specialist may search the incident's saved logs (read-only)
     assert scopes["storage-agent"] == {"get_filesystem_usage", "get_ost_usage"} | knowledge
     assert scopes["scheduler-agent"] == {"get_job_status", "get_node_status"} | knowledge
     assert scopes["network-agent"] == {"get_network_status"} | knowledge

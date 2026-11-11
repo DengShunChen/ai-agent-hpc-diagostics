@@ -1,0 +1,7 @@
+# Development scenario (Fujitsu TCS-style platform; approximated PJM/Tofu/FEFS formats): may be looked at while building the agents (unlike a blind set).
+scenario_id: SIM-FX-012
+seed: 2012
+platform: tcs-fx1000
+fault: logs_missing
+distractors: [lustre_reconnects]
+description: "Job record purged and logs from the job window not kept: nothing to conclude."

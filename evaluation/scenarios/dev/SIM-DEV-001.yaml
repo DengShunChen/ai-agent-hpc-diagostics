@@ -1,0 +1,6 @@
+# Development scenario: may be looked at while building the agents (unlike a blind set).
+scenario_id: SIM-DEV-001
+seed: 1001
+fault: oom_kill
+distractors: [other_job_oom, lustre_reconnects]
+description: "Job killed by the cgroup OOM handler; another job also hit OOM elsewhere."

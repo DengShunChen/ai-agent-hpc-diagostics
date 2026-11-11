@@ -1,0 +1,6 @@
+# Development scenario: may be looked at while building the agents (unlike a blind set).
+scenario_id: SIM-DEV-013
+seed: 1013
+fault: segfault
+distractors: [other_job_oom, other_node_xid13, old_correctable_ecc]
+description: "Application segfault with three misleading signals."

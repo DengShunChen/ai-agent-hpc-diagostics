@@ -27,3 +27,6 @@ audit-data/
 # Pilot exports contain operational data
 evaluation/pilot/*.csv
 !evaluation/pilot/pilot-template.csv
+evaluation/drill/*.csv
+!evaluation/drill/drill-template.csv
+!evaluation/drill/answers-template.csv

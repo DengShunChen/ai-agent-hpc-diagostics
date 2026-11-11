@@ -186,6 +186,18 @@ def test_text_check_allows_grounded_numbers():
     assert text_problem("x" * 400, set()) == "text too long"
 
 
+def test_text_check_ignores_only_existing_reference_labels():
+    labels = frozenset({"T1", "T2", "I1"})
+    assert text_problem("T1 and T2 show the node drained (I1)", set(), labels) is None
+    # a label that doesn't exist in the run is not exempt: its digits are still checked
+    assert text_problem("T7 shows the node drained", set(), labels) == "numbers not found in the data: 7"
+    # numbers next to real labels are still checked
+    assert text_problem("T1 shows 95 errors", set(), labels) == "numbers not found in the data: 95"
+    assert text_problem("T1 shows 95 errors", {"95"}, labels) is None
+    # without labels (the default) nothing changes
+    assert text_problem("T1 shows the node drained", set()) == "numbers not found in the data: 1"
+
+
 def test_rules_specialist_is_unchanged_without_a_model(adapter, gateway, scopes):
     run = run_diagnosis(adapter.load_incident("POC-SCHEDULER-001"), gateway, scopes)
     assert all(d.reasoning == "rules" for d in run.diagnoses) and run.triage.reasoning == "rules"

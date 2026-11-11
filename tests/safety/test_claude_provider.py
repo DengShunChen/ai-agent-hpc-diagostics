@@ -39,7 +39,8 @@ class FakeClient:
     def _create(self, **kwargs):
         self.requests.append(kwargs)
         content, stop = self.responses.pop(0)
-        return NS(content=content, stop_reason=stop, stop_details=NS(category="cyber") if stop == "refusal" else None)
+        return NS(content=content, stop_reason=stop, stop_details=NS(category="cyber") if stop == "refusal" else None,
+                  usage=NS(input_tokens=100_000, output_tokens=10_000))
 
 
 def provider(*responses):
@@ -156,3 +157,38 @@ def test_evaluation_refuses_claude_on_non_synthetic_cases(tmp_path):
     (tmp_path / "cases" / "EVAL-GPU-001.json").write_text(json.dumps(case))
     with pytest.raises(PermissionError):
         evaluate(tmp_path / "cases", llm=ClaudeProvider(client=FakeClient()))
+
+
+def test_spend_is_tracked_and_the_cap_stops_requests(tmp_path):
+    from hpc_agent.llm.claude import BudgetExceededError
+
+    ledger = tmp_path / "spend.json"
+    client = FakeClient(*[([text("{}")], "end_turn")] * 5)
+    llm = ClaudeProvider(model="claude-sonnet-5-5", client=client, budget_usd=0.5, ledger=ledger)
+    llm.chat([{"role": "user", "content": "hi"}])  # 100k in x $2 + 10k out x $10 = $0.30
+    assert llm.usage["requests"] == 1 and abs(llm.usage["cost_usd"] - 0.30) < 1e-9
+    llm.chat([{"role": "user", "content": "hi"}])  # $0.60 > cap afterwards
+    with pytest.raises(BudgetExceededError):
+        llm.chat([{"role": "user", "content": "hi"}])
+    assert len(client.requests) == 2
+    # The cap counts spend across runs: a new process with the same ledger is already over.
+    again = ClaudeProvider(model="claude-sonnet-5-5", client=FakeClient(([text("{}")], "end_turn")),
+                           budget_usd=0.5, ledger=ledger)
+    with pytest.raises(BudgetExceededError):
+        again.chat([{"role": "user", "content": "hi"}])
+    assert (ledger.stat().st_mode & 0o777) == 0o600
+
+
+def test_budget_needs_a_known_price():
+    with pytest.raises(LLMConfigError):
+        ClaudeProvider(model="claude-unknown-1", client=FakeClient(), budget_usd=1.0)
+
+
+def test_over_budget_agent_falls_back_to_rules(adapter, gateway, scopes, tmp_path):
+    ledger = tmp_path / "spend.json"
+    ledger.write_text('{"cost_usd": 9.0, "requests": 1}')
+    client = FakeClient()
+    llm = ClaudeProvider(model="claude-sonnet-5-5", client=client, budget_usd=5.0, ledger=ledger)
+    d = LLMSpecialist(SchedulerAgent(), Domain.SCHEDULER, llm).diagnose(
+        adapter.load_incident("POC-SCHEDULER-001"), ScopedGateway(gateway, "scheduler-agent", scopes, []))
+    assert client.requests == [] and d.reasoning == "rules-fallback" and "spend cap" in d.reasoning_note

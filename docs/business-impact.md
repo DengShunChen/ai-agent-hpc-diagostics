@@ -74,6 +74,22 @@ These are workflow timings, **not MTTR**.
 The operational procedure for running this protocol at a site is in
 [pilot-runbook.md](pilot-runbook.md) (Traditional Chinese).
 
+## Target cluster and how long a pilot takes
+
+The target cluster has 3840 FX1000 nodes and 24 RX2570 M6 nodes with A100 GPUs. Hard incidents arrive
+about 1-3 times a month and take 1-3 days each to analyse today (figures from the site, not measured
+by the platform). At that rate the protocol above (at least 10 incidents per period in a category)
+needs many months per period. Two earlier, weaker measurements are possible meanwhile:
+
+1. **Synthetic drill** ([evaluation/drill/README.md](../evaluation/drill/README.md)): engineers analyse
+   simulated incidents with injected root causes, with and without the agent, in a crossover design.
+   It measures time and correctness *on the simulator*, never MTTR.
+2. **Replay of past tickets**: de-identified exports of solved incidents, imported with
+   `hpc-agent import-export --adapter raw`, scored against the root cause the site recorded. Labels
+   come from the site, so this is closer to reality than the simulator, but it is still retrospective.
+
+Only the live pilot can support an MTTR or localization-time claim.
+
 ## What is needed before any claim
 
 - Representative incidents: real, de-identified, labelled by site engineers.

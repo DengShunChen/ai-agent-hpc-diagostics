@@ -1,0 +1,7 @@
+# Development scenario (Fujitsu TCS-style platform; approximated PJM/Tofu/FEFS formats): may be looked at while building the agents (unlike a blind set).
+scenario_id: SIM-FX-011
+seed: 2011
+platform: tcs-fx1000
+fault: ost_imbalance
+distractors: [other_job_oom]
+description: "Two OSTs nearly full while the file system overall has space."

@@ -1,0 +1,6 @@
+# Development scenario: may be looked at while building the agents (unlike a blind set).
+scenario_id: SIM-DEV-003
+seed: 1003
+fault: walltime
+distractors: [recovered_link_flap]
+description: "Job reached its time limit; an IB link on a job node flapped hours earlier."

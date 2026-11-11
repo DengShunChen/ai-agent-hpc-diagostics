@@ -1,8 +1,8 @@
 """Tools as the model sees them, and how the harness runs the calls it asks for.
 
 The model only names a tool. Arguments come from the harness: data tools always get this
-incident's ID; a knowledge query is normalised and must still pass the gateway's argument
-pattern. Every call goes through the agent's ScopedGateway, so its scope, the run's call
+incident's ID; a knowledge query or log keywords are normalised and must still pass the gateway's
+argument pattern, and a log source must be one of the fixed sources. Every call goes through the agent's ScopedGateway, so its scope, the run's call
 budget and the tool-call log apply unchanged.
 """
 
@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from hpc_agent.models import Incident
 from hpc_agent.runtime.hooks import CallContext, post_tool_use, pre_tool_use
 from hpc_agent.runtime.trace import Emit, no_trace
+from hpc_agent.tools.log_tools import LOG_SOURCES
 from hpc_agent.tools.gateway import ScopedGateway, ToolArgumentError, ToolNotAllowedError, ToolResult, ToolStatus
 
 MAX_RESULT_CHARS = 3000
@@ -43,6 +44,9 @@ def tool_specs(gateway: ScopedGateway) -> list[dict]:
         properties = {"query": {"type": "string", "description": "a few keywords"}} if "query" in params else {}
         if "skill" in params:
             properties = {"skill": {"type": "string", "description": "a skill name from your skills list"}}
+        if "source" in params:
+            properties = {"source": {"type": "string", "enum": list(LOG_SOURCES), "description": "which saved log"},
+                          "keywords": {"type": "string", "description": "words every line must contain"}}
         specs.append({"type": "function", "function": {
             "name": tool, "description": description,
             "parameters": {"type": "object", "properties": properties, "required": sorted(properties)},
@@ -63,6 +67,13 @@ def run_tool(name: str, arguments: dict, incident: Incident, gateway: ScopedGate
     kwargs = {"incident_id": incident.incident_id} if "incident_id" in params else {}
     if "query" in params:
         kwargs["query"] = " ".join(str(arguments.get("query") or default_query).split())[:200]
+    if "source" in params:
+        source, keywords = str(arguments.get("source") or ""), " ".join(str(arguments.get("keywords") or "").split())
+        if source not in LOG_SOURCES or not keywords:
+            session.emit("tool_call", tool=name, permission=ctx.permission.value, decision="denied",
+                         reason="needs source and keywords", requested=arguments)
+            return f"error: {name} needs source (one of {', '.join(LOG_SOURCES)}) and keywords"
+        kwargs |= {"source": source, "keywords": keywords[:120]}
     if "skill" in params:
         requested = str(arguments.get("skill") or "").strip()
         if requested not in session.skills:  # only names from the agent's own index

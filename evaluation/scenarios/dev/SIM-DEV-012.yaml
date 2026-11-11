@@ -1,0 +1,6 @@
+# Development scenario: may be looked at while building the agents (unlike a blind set).
+scenario_id: SIM-DEV-012
+seed: 1012
+fault: logs_missing
+distractors: [lustre_reconnects]
+description: "Job record purged and logs from the job window not kept: nothing to conclude."

@@ -1,0 +1,6 @@
+# Development scenario: may be looked at while building the agents (unlike a blind set).
+scenario_id: SIM-DEV-005
+seed: 1005
+fault: memory_ecc_node_down
+distractors: [other_node_xid13]
+description: "Uncorrectable memory ECC error, health check drained the node, node went down."

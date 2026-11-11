@@ -1,0 +1,9 @@
+# Development scenario: may be looked at while building the agents (unlike a blind set).
+scenario_id: SIM-DEV-014
+seed: 1014
+fault: ib_flap_lustre
+distractors: [drained_other_node]
+nodes: 32
+gpu_nodes: 8
+osts: 12
+description: "IB flap cascade on a larger cluster."

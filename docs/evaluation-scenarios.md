@@ -1,0 +1,152 @@
+# Simulated Scenarios: Evaluation
+
+Generated 2026-11-11 with `hpc-agent evaluate --scenarios` on scenarios written by `hpc-agent simulate`
+(`src/hpc_agent/simulate/`). Each scenario is a simulated export (raw scheduler logs, syslog, command
+output) with one injected root cause, background noise and misleading signals. It goes through the same
+path as a real site export: `import-export --adapter raw` (contract checks, pseudonymization, credential
+scan) into a temporary data root, then the full workflow. Labels are kept in a separate directory the
+import adapter never reads.
+
+> **Read this first.** The scenarios are synthetic and the fault catalog, the log formats and the labels
+> were all written by the POC developer. The numbers show how the agents behave **on this simulator**.
+> They are not evidence of accuracy on real incidents, and **no MTTR or analysis-time reduction is
+> claimed** (see [business-impact.md](business-impact.md)).
+
+## Scenario sets
+
+| Set | Platform | Scenarios | Faults covered | Log lines per scenario |
+|---|---|---|---|---|
+| `evaluation/scenarios/dev/` | `slurm-x86`: Slurm (slurmctld, slurmd), InfiniBand, Lustre | 14 (seeds 1001-1014) | all 12 | about 1,900-3,100 |
+| `evaluation/scenarios/fx1000/` | `tcs-fx1000`: PJM, Tofu, FEFS, FX1000 + RX2570 M6/A100 | 14 (seeds 2001-2014) | all 12 | about 1,900-3,800 |
+
+Both sets are **development sets**: they were looked at while the simulator and the log tool were built.
+A blind set (`simulate --blind-seed`) has not been evaluated yet.
+
+## Results
+
+| Metric | Rules, Slurm set | qwen2.5:7b, Slurm set | Rules, FX1000 set |
+|---|---|---|---|
+| Correct domain classification | 86% | 43% | 86% |
+| Root cause accuracy, top-1 | 77% | 31% | 77% |
+| Root cause accuracy, top-3 | 77% | 38% | 85% |
+| Outcome matches label | 93% | 86% | 100% |
+| Correct refusal to conclude | 100% | 0% | 100% |
+| Open hypotheses backed by tool evidence | 100% | 86% | 100% |
+| Unsupported claim rate | 0% | 0% | 0% |
+| Scenarios with an injected key log line cited | 0 of 13 (rules never search logs) | **0 of 13** | 0 of 12 (rules never search logs) |
+| Log searches per scenario (7B) | – | 2-5 | – |
+| Mean time per scenario | 8 ms | 330 s | 9 ms |
+| Model proposals discarded by the checks | – | 19 | – |
+
+Top-1 and top-3 are over the 13 scenarios labelled with a supported root cause; the `logs_missing`
+scenario counts toward the refusal metric instead. The 7B run used Ollama on an 8-core CPU
+with no GPU, deterministic decoding, `HPC_AGENT_LLM_TIMEOUT=900`. The 7B model was not run on the FX1000
+set, and Claude was not run on either set.
+
+### Where the rules miss
+
+- **Network cascades** (`ib_flap_lustre`, SIM-DEV-009/014, SIM-FX-009/014): link flaps → LNet timeouts →
+  job I/O failure. Triage routes on the user's symptom ("job failed"), so the network agent is not
+  consulted and the scheduler agent reports a non-zero exit code. The rules never read logs, and the link
+  counters alone are not routed to.
+- **OOM on Slurm** (SIM-DEV-001): the simulated `sacct` records `OUT_OF_MEMORY` with exit code `0:125`,
+  which the adapter does not turn into an exit code (it only maps signals 1-64), so no evidence reaches
+  the scheduler agent. On FX1000 the `pjstat` reason is parsed, and the same fault is found.
+- **Memory ECC node failure on FX1000** (SIM-FX-005): the rules lead with `scheduler.signal_termination`
+  (the job was killed with signal 9) instead of `node.unhealthy`.
+
+### Where qwen2.5:7b misses
+
+- **GPU faults** (SIM-DEV-006/007/008): the model led with `application.crash` or a storage error instead
+  of the GPU hardware fault that `dcgmi` and the XID events show. Triage routed mostly to the scheduler.
+- **Storage and cascades**: `storage.io_error` with low confidence in place of `storage.capacity`, and no
+  supported hypothesis for the first cascade.
+- **Refusal**: on `logs_missing` (SIM-DEV-012) it reported `insufficient_evidence` with a
+  `scheduler.signal_termination` guess instead of no supported hypothesis.
+- **Logs**: it searched 2-5 times per scenario but never produced a log fact the checks kept.
+
+**One traced run (SIM-DEV-006, `gpu_xid79`, rerun with `diagnose` to read the trace).** Triage routed to
+GPU and scheduler. Both agents searched only `slurmctld` for the job ID; neither searched `syslog`,
+where the injected NVRM XID 79 lines are. The GPU agent did read `gpu_health` (GPU 1: `failure`, XID 79),
+but called it an application-class XID, and all three of its proposals were discarded because every
+fact named node `node-6e54…` instead of `node-c8d3…`. `node-6e54…` is the pseudonym of `slurmctld`,
+the node field of every scheduler-log line: the importer pseudonymizes it like a host name, so the
+controller looks like a compute node, and the model took it for the job's node. The scheduler agent's
+`application.crash` (exit code 1) was the only proposal kept. The checks did their job (no wrong fact
+reached the report), but the model's answer was wrong for three separate reasons: search strategy,
+XID knowledge, and a misleading node name in the imported scheduler log. The last one is an import
+issue, fixed after this run (see the disclosure below).
+
+## What this shows
+
+1. **The simulator and the import path work end to end.** Raw logs and command output go through the
+   same adapter, contract checks and pseudonymization a real export would, and the agents run on the
+   result. This is the main deliverable of this step.
+2. **The scenarios are harder than the 13 hand-written cases**, as intended. The rules drop from 100% to
+   77% top-1, and the misses are the ones a real operator would care about: cascades across domains.
+3. **The local 7B model does not use the logs usefully.** It calls `get_log_lines`, but no scenario ended
+   with an injected key line as evidence, and its root-cause accuracy is below the rules. On this
+   hardware it also takes about 5.5 minutes per scenario.
+4. **Nothing here measures analysis time.** That needs the human drill (`evaluation/drill/`): engineers
+   analysing the same scenarios with and without the agent's report, with time *and* correctness
+   recorded per arm.
+
+## Limitations
+
+- **Synthetic, developer-written.** The fault catalog, the timing between symptoms, the distractors and
+  the labels are one person's model of these faults. An agent that matches this model may still fail on
+  real incidents.
+- **TCS formats are approximations.** PJM, `pjstat`, Tofu and FEFS messages were written from general
+  knowledge of those products, not copied from real output. Before a drill on the target cluster they
+  should be checked against a few de-identified real lines.
+- **Small log volume.** About 2,000-4,000 lines per scenario, limited by the 1 MB per-file limit of the
+  data adapter and the 6,000-line log index. A real day on 3,840 nodes is orders of magnitude larger.
+- **Limited command coverage.** `dcgmi` health is exported for the job's GPU node only; host names that
+  appear only inside free log text are not pseudonymized (all names are `sim-` here).
+- **Rule-based agents do not read logs** in this version, by design, so the log-evidence column only
+  measures the LLM agents.
+- **Small samples.** 13-14 scenarios per set; one scenario is 7-8 percentage points.
+
+## Disclosure: changes made during this work
+
+- **Labels:** storage faults (`ost_full`, `ost_imbalance`) accept `storage` or `multi-domain` as the
+  classification. This was changed after the first rules run on the dev set, where the rules classified
+  them as `multi-domain` with the storage agent's tool evidence leading.
+- **Generator:** the OST usage baseline was narrowed from 41-68% to 50-62% before any LLM run, so that
+  scenarios without an imbalance fault stay under the site's OST-spread threshold.
+- **Agent definitions:** `get_log_lines` was added to the scheduler, GPU, network and storage agents, with
+  one prompt paragraph on how to cite a log line (the exact `text`, `where` = line number), and their
+  limits were raised to `max_rounds` 5 and `max_tool_calls` 8 so a log search does not use up the budget.
+  No scenario-specific hints were added.
+- **Number check (2026-11-11):** T#/I# reference labels are skipped by the check that every number in
+  model text appears in the data (see [evaluation-llm.md](evaluation-llm.md)). Made on the 13 cases, before
+  these runs.
+- **Job manager log node (2026-11-11, after the 7B run):** the traced SIM-DEV-006 run showed that the
+  importer gave every `slurmctld`/`pjm` line the node `slurmctld`/`pjm`, which was then pseudonymized
+  like a host (`node-6e54…`) and looked like the job's compute node. Those lines now carry no node; the
+  daemon name is no longer pseudonymized or replaced in log text. The same look found that the
+  evaluator could never count a cited scheduler-log key line (labels name the controller host, the
+  index named the daemon); it now matches those lines by source and line number. Rules results on both
+  sets are unchanged (rules don't read logs). **The 7B numbers above were measured before this fix**
+  and have not been rerun.
+- Results on the dev sets after these changes are not an independent test of them. The blind set is.
+
+## How to reproduce
+
+```bash
+PYTHONPATH=src .venv/bin/python -m hpc_agent.main simulate --scenarios evaluation/scenarios/dev --output ~/sim-dev
+PYTHONPATH=src .venv/bin/python -m hpc_agent.main evaluate --scenarios ~/sim-dev
+MODEL_PROVIDER=ollama MODEL_NAME=qwen2.5:7b HPC_AGENT_LLM_TIMEOUT=900 \
+  PYTHONPATH=src .venv/bin/python -m hpc_agent.main evaluate --scenarios ~/sim-dev --reasoning llm
+```
+
+The output directory must be outside the repository and new or empty.
+
+## Next steps
+
+1. Rerun qwen2.5:7b on the dev set with the job-manager log fix (about 80 minutes on this host).
+2. Calibrate the TCS formats against a few de-identified real PJM, Tofu and FEFS lines.
+3. Evaluate a blind set once, with the seed kept by someone other than the developer.
+4. Run the human drill (`evaluation/drill/README.md`) to measure time and correctness with and without
+   the agent's report.
+5. Replay past tickets from the target cluster through `import-export --adapter raw`.

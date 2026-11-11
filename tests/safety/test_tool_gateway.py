@@ -18,6 +18,7 @@ EXPECTED_TOOLS = (
     "get_filesystem_usage",
     "get_gpu_health",
     "get_job_status",
+    "get_log_lines",  # searches an incident's saved, de-identified log index; read-only
     "get_network_status",
     "get_node_status",
     "get_ost_usage",

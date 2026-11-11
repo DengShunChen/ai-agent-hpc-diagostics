@@ -1,0 +1,7 @@
+# Development scenario (Fujitsu TCS-style platform; approximated PJM/Tofu/FEFS formats): may be looked at while building the agents (unlike a blind set).
+scenario_id: SIM-FX-009
+seed: 2009
+platform: tcs-fx1000
+fault: ib_flap_lustre
+distractors: [lustre_reconnects, old_correctable_ecc]
+description: "Tofu link flapping on a job node, Lustre client lost its OST, write failed (cascade)."

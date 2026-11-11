@@ -1,0 +1,6 @@
+# Development scenario: may be looked at while building the agents (unlike a blind set).
+scenario_id: SIM-DEV-009
+seed: 1009
+fault: ib_flap_lustre
+distractors: [lustre_reconnects, old_correctable_ecc]
+description: "IB link flapping on a job node, Lustre client lost its OST, write failed (cascade)."
