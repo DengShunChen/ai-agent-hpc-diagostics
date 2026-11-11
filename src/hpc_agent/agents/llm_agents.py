@@ -242,7 +242,8 @@ class LLMSpecialist:
             self._emit("fallback", reason=str(error))
             diagnosis = self._rules.diagnose(incident, gateway)
             return diagnosis.model_copy(update={"reasoning": "rules-fallback",
-                                                "reasoning_note": safe_note(f"{self._llm.model}: {error}")})
+                                                "reasoning_note": safe_note(f"{self._llm.model}: {error}"),
+                                                "consulted_by": consult.from_agent if consult else None})
 
     def _diagnose(self, incident: Incident, gateway: ScopedGateway,
                   consult: ConsultRequest | None = None) -> AgentDiagnosis:

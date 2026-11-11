@@ -246,7 +246,7 @@ async def run_diagnosis_async(
         end_time=datetime.now(UTC),
         triage=triage,
         diagnoses=[by_agent[a] for a in triage.selected_agents if a in by_agent]
-        + [d for a, d in by_agent.items() if a not in triage.selected_agents and d.consulted_by],
+        + [d for a, d in by_agent.items() if a not in triage.selected_agents],  # only a consult runs these
         unavailable_agents=[a for a in triage.selected_agents if a not in implemented],
         rca=results[0].rca,
         remediation=results[0].plan,

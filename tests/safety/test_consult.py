@@ -2,6 +2,7 @@
 
 import pytest
 
+from hpc_agent.llm.provider import LLMUnavailableError
 from hpc_agent.safety.guards import verify_run
 from hpc_agent.workflows import diagnostic_workflow
 from hpc_agent.workflows.diagnostic_workflow import render_report, run_diagnosis
@@ -37,6 +38,19 @@ def test_grounded_consult_runs_an_agent_triage_did_not_select(adapter, gateway, 
     brief = prompt_of(llm, "network")[1]["content"]
     assert 'node=sim-node-0042: state="DRAIN"' in brief  # the checked statement, written from the data
     assert INJECTION not in str(prompt_of(llm, "network"))  # the model's own words never travel
+    verify_run(result, scopes)
+
+
+@pytest.mark.parametrize("failure", [LLMUnavailableError("connection refused"), {"content": "not json"}])
+def test_a_consulted_agent_that_falls_back_stays_in_the_run(adapter, gateway, scopes, failure):
+    # Regression (found in an independent audit): the rules fallback dropped consulted_by, so the workflow left the
+    # consulted agent out of run.diagnoses and evaluation counted the run as model-complete.
+    result, _ = run(adapter, gateway, scopes, {"consult": [{"domain": "network", "facts": [DRAIN]}]},
+                    network=[failure])
+    assert agents(result) == ["scheduler-agent", "network-agent"]
+    network = result.diagnoses[1]
+    assert network.reasoning == "rules-fallback" and network.consulted_by == "scheduler-agent"
+    assert "consulted by scheduler-agent" in render_report(result)
     verify_run(result, scopes)
 
 
