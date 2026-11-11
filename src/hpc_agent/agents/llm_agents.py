@@ -242,7 +242,7 @@ class LLMSpecialist:
             self._emit("fallback", reason=str(error))
             diagnosis = self._rules.diagnose(incident, gateway)
             return diagnosis.model_copy(update={"reasoning": "rules-fallback",
-                                                "reasoning_note": f"{self._llm.model}: {error}"})
+                                                "reasoning_note": safe_note(f"{self._llm.model}: {error}")})
 
     def _diagnose(self, incident: Incident, gateway: ScopedGateway,
                   consult: ConsultRequest | None = None) -> AgentDiagnosis:
@@ -498,7 +498,7 @@ class LLMTriageAgent:
         except (LLMUnavailableError, _Unusable) as error:
             self._emit("fallback", reason=str(error))
             return rules.model_copy(update={"reasoning": "rules-fallback",
-                                            "reasoning_note": f"{self._llm.model}: {error}"})
+                                            "reasoning_note": safe_note(f"{self._llm.model}: {error}")})
 
     def _triage(self, incident: Incident, rules: TriageResult) -> TriageResult:
         reported, items = incident_items(incident, with_source=False)

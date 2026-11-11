@@ -199,3 +199,41 @@ def test_r3_ordinary_exception_text_is_kept(tmp_path, monkeypatch):
     failing_second(monkeypatch, TimeoutError("model did not answer within 900 s"))
     _, _, logs = evaluate_scenarios(make(tmp_path))
     assert next(r for r in logs if r.case_id == "SIM-E-002").error == "TimeoutError: model did not answer within 900 s"
+
+
+class SensitiveDown:
+    name, model = "fake", "down"
+
+    def chat(self, messages, tools=None, json_output=False):
+        raise LLMUnavailableError("refused: password=hunter2hunter2")
+
+
+def test_r3_real_fallback_notes_are_masked_in_the_persisted_run(tmp_path):
+    results, summary, logs = evaluate_scenarios(make(tmp_path, faults=("segfault",)), llm=SensitiveDown(),
+                                                runs_dir=tmp_path / "runs")
+    assert logs[0].fallbacks and logs[0].model_complete is False
+    texts = [p.read_text() for p in (tmp_path / "runs").iterdir()]
+    texts += [json.dumps([r.model_dump() for r in logs]), render_log_section(logs, results)]
+    assert not any("hunter2" in t for t in texts)
+    run = json.loads((tmp_path / "runs" / "SIM-E-001.run.json").read_text())["run"]
+    assert run["triage"]["reasoning"] == "rules-fallback" and "hunter2" not in run["triage"]["reasoning_note"]
+
+
+def test_r2_interrupt_after_the_run_was_written_closes_the_batch(tmp_path, monkeypatch):
+    real = scenarios.score
+
+    def score(case, run):
+        if case.case_id == "SIM-E-002":
+            raise KeyboardInterrupt()
+        return real(case, run)
+
+    monkeypatch.setattr(scenarios, "score", score)
+    with pytest.raises(KeyboardInterrupt):  # not FileExistsError
+        evaluate_scenarios(make(tmp_path), runs_dir=tmp_path / "runs")
+    runs = tmp_path / "runs"
+    m = json.loads((runs / "manifest.json").read_text())
+    assert m["status"] == "interrupted" and m["active_case"] == "SIM-E-002"
+    assert m["active_case_stage"] == "diagnosed, not scored" and m["interruption"] == "KeyboardInterrupt: "
+    assert json.loads((runs / "SIM-E-002.run.json").read_text())["status"] == "completed"  # kept as written
+    progress = [json.loads(x)["status"] for x in (runs / "progress.jsonl").read_text().splitlines()]
+    assert progress == ["completed", "completed", "interrupted after diagnosis"]

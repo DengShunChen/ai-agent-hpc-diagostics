@@ -106,6 +106,17 @@ def safe_text(text: str, limit: int = 200) -> str:
     return SENSITIVE if find_credential_like(text) else text
 
 
+def _masked(value):
+    """Every string in a record, credential-like ones withheld (defense in depth for persisted runs)."""
+    if isinstance(value, dict):
+        return {k: _masked(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_masked(v) for v in value]
+    if isinstance(value, str) and find_credential_like(value):
+        return SENSITIVE
+    return value
+
+
 def safe_error(error: BaseException) -> str:
     return f"{type(error).__name__}: {safe_text(str(error))}"
 
@@ -220,7 +231,7 @@ def evaluate_scenarios(
                             component_hit=False if label.components else None,
                             model_complete=None if llm is None else False)  # a failed case did not complete
                 trace, started = TraceRecorder(), time.monotonic()
-                active = (scenario_id, trace, started)
+                active = {"id": scenario_id, "trace": trace, "started": started, "kept": False}
                 if scenario_id in report.rejected:
                     error = f"import rejected: {safe_text(report.rejected[scenario_id])}"
                     results.append(_failed(case, error, 0.0))
@@ -238,6 +249,7 @@ def evaluate_scenarios(
                     _keep(runs_dir, scenario_id, None, trace, seconds, reason, llm)
                     continue
                 _keep(runs_dir, scenario_id, run, trace, time.monotonic() - started, "", llm)
+                active["kept"] = True  # its run is on disk; an interruption from here on must not rewrite it
                 results.append(score(case, run))
                 lead = next((c for c in run.rca.probable_causes if c.status.value == "hypothesis"), None)
                 faulty = {_pseudonymize_component(c, pseudonymizer) for c in label.components}
@@ -257,15 +269,21 @@ def evaluate_scenarios(
                                       fallbacks=fallbacks))
                 active = None
     except BaseException as error:
-        if active is not None:  # keep what the interrupted case had: its trace, time and the usage known so far
-            scenario_id, trace, started = active
-            _keep(runs_dir, scenario_id, None, trace, time.monotonic() - started, safe_error(error), llm,
-                  status="interrupted")
+        # The manifest is closed out first, so a problem while keeping the active case can't leave it "running".
         state["status"] = "interrupted"
-        _write_manifest(runs_dir, {**state, "finished_cases": len(results),
-                                   "active_case": active[0] if active else None,
+        _write_manifest(runs_dir, {**state, "finished_cases": len(results), "interruption": safe_error(error),
+                                   "active_case": active["id"] if active else None,
+                                   "active_case_stage": None if not active else
+                                   ("diagnosed, not scored" if active["kept"] else "diagnosing"),
                                    "pending_cases": sorted(labels)[len(results) + (1 if active else 0):],
                                    "batch_wall_seconds": round(time.monotonic() - batch_started, 3)})
+        if active is not None and runs_dir is not None:
+            seconds = time.monotonic() - active["started"]
+            if active["kept"]:  # the run record stays as written; only the progress log notes the interruption
+                _progress(runs_dir, active["id"], "interrupted after diagnosis", seconds, llm)
+            else:  # keep what the case had: its trace, time and the usage known so far
+                _keep(runs_dir, active["id"], None, active["trace"], seconds, safe_error(error), llm,
+                      status="interrupted")
         raise
     state["status"] = "complete"
     _write_manifest(runs_dir, {**state, "finished_cases": len(results),
@@ -296,12 +314,16 @@ def _keep(runs_dir: Path | None, scenario_id: str, run, trace: TraceRecorder, se
     if record_path.exists():
         raise FileExistsError(f"refusing to overwrite {record_path}")
     status = status or ("failed" if error else "completed")
-    record = {"scenario_id": scenario_id, "status": status, "wall_seconds": round(seconds, 3), "error": error,
-              "run": run.model_dump(mode="json") if run is not None else None}
+    record = _masked({"scenario_id": scenario_id, "status": status, "wall_seconds": round(seconds, 3), "error": error,
+                      "run": run.model_dump(mode="json") if run is not None else None})
     record_path.write_text(json.dumps(record, indent=1), encoding="utf-8")
     with (runs_dir / f"{scenario_id}.trace.jsonl").open("x", encoding="utf-8") as handle:
         for event in trace.events:
-            handle.write(json.dumps(event, ensure_ascii=False, default=str) + "\n")
+            handle.write(json.dumps(_masked(event), ensure_ascii=False, default=str) + "\n")
+    _progress(runs_dir, scenario_id, status, seconds, llm)
+
+
+def _progress(runs_dir: Path, scenario_id: str, status: str, seconds: float, llm: ChatLLM | None) -> None:
     usage = dict(getattr(llm, "usage", {}) or {}) if getattr(llm, "name", None) == "anthropic" else None
     with (runs_dir / "progress.jsonl").open("a", encoding="utf-8") as handle:
         handle.write(json.dumps({"scenario_id": scenario_id, "status": status,
