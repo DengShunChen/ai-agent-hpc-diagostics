@@ -10,7 +10,8 @@
 
 Only the index (name + description) goes into an agent's prompt; the model reads the full text
 with the `load_skill` tool when it needs it. Skills live in the repository, so they are
-versioned and reviewed like code; an agent can't write one. They are reference material, never
+versioned and reviewed like code. An agent can't write one directly: it may draft one from a
+human-approved run (llm/skill_writer.py), and only a human operator's approval installs it. They are reference material, never
 evidence, and they can't change the agent's rules. `version()` fingerprints all skills so an
 evaluation can record exactly which ones it ran with.
 """

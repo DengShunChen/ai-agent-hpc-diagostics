@@ -13,6 +13,7 @@ class Operation(StrEnum):
     RECOMMEND_ACTION = "RECOMMEND_ACTION"
     RECORD_HUMAN_DECISION = "RECORD_HUMAN_DECISION"
     GENERATE_EXPLANATION = "GENERATE_EXPLANATION"  # local LLM re-phrases existing evidence only
+    DRAFT_SKILL = "DRAFT_SKILL"  # the LLM proposes a skill from an approved run; a human approves it
     RUN_ARBITRARY_COMMAND = "RUN_ARBITRARY_COMMAND"
     SSH_PRODUCTION = "SSH_PRODUCTION"
     MODIFY_PRODUCTION = "MODIFY_PRODUCTION"
@@ -33,6 +34,7 @@ POC_RULES = MappingProxyType(
         Operation.RECOMMEND_ACTION: Decision.ALLOW,
         Operation.RECORD_HUMAN_DECISION: Decision.ALLOW,
         Operation.GENERATE_EXPLANATION: Decision.ALLOW,
+        Operation.DRAFT_SKILL: Decision.ALLOW,
         Operation.RUN_ARBITRARY_COMMAND: Decision.DENY,
         Operation.SSH_PRODUCTION: Decision.DENY,
         Operation.MODIFY_PRODUCTION: Decision.DENY,

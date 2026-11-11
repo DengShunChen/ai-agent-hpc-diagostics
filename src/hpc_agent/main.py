@@ -16,6 +16,10 @@
     hpc-agent evaluate [--output docs/evaluation.md] [--approvals-log PATH]   score labelled cases
     hpc-agent explain RUN-ID [--operator NAME]        local-LLM explanation of a run (MODEL_PROVIDER=ollama)
     hpc-agent metrics [--json]                        workflow timings per site (not MTTR)
+    hpc-agent draft-skill RUN-ID [--operator NAME]    LLM drafts a skill from an APPROVED run (never installed)
+    hpc-agent skill-drafts [DRAFT-ID]                 list drafts, or show one draft's SKILL.md
+    hpc-agent approve-skill DRAFT-ID --operator NAME [--comment]   a human installs the draft into skills/
+    hpc-agent reject-skill DRAFT-ID --operator NAME --comment TEXT
     hpc-agent compare-pilot FILE.csv [--min-n 10]     baseline vs assisted localization time / MTTR
     hpc-agent import-export DIR --output DATA_ROOT [--adapter csv|raw] [--dry-run]   validate + de-identify an export
     hpc-agent simulate (--scenarios DIR | --blind-seed N --count K [--faults novel]) --output DIR   simulated logs
@@ -76,6 +80,15 @@ def _parser() -> argparse.ArgumentParser:
         cmd.add_argument("--operator", required=True, help="human operator identity")
         cmd.add_argument("--comment", default="")
     sub.add_parser("verify-audit")
+    draft = sub.add_parser("draft-skill", help="ask the LLM to draft a skill from an approved run")
+    draft.add_argument("run_id")
+    draft.add_argument("--operator", default=None)
+    sub.add_parser("skill-drafts", help="list skill drafts or show one").add_argument("draft_id", nargs="?")
+    for name in ("approve-skill", "reject-skill"):
+        cmd = sub.add_parser(name)
+        cmd.add_argument("draft_id")
+        cmd.add_argument("--operator", required=True, help="human operator identity")
+        cmd.add_argument("--comment", default="")
     sub.add_parser("metrics", help="workflow timings and override rate per site").add_argument(
         "--json", action="store_true")
     pilot = sub.add_parser("compare-pilot", help="compare baseline vs assisted pilot periods")
@@ -256,7 +269,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {error}", file=sys.stderr)
         return 2
     problem = _cloud_problem(reasoning_llm, adapter) or _cloud_problem(explainer_llm, adapter)
-    if problem and args.command in ("serve", "diagnose", "explain"):
+    if problem and args.command in ("serve", "diagnose", "explain", "draft-skill"):
         print(f"error: {problem}", file=sys.stderr)
         return 2
     service = ApprovalService(default_state_dir(), adapter, gateway, reasoning_llm=reasoning_llm)
@@ -330,6 +343,36 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"[{result.disclaimer}]")
             for reason in result.rejection_reasons:
                 print(f"  - {reason}")
+        elif args.command == "draft-skill":
+            if explainer_llm is None:
+                print("error: no LLM configured; set MODEL_PROVIDER (and MODEL_NAME)", file=sys.stderr)
+                return 2
+            record = service.draft_skill(args.run_id, explainer_llm, operator=args.operator)
+            if record["event"] == "drafted":
+                print(f"{record['draft_id']}: draft {record['name']!r} for {', '.join(record['agents'])} (not installed)\n")
+                print(record["text"])
+                print(f"A human must review it: hpc-agent approve-skill {record['draft_id']} --operator NAME")
+            else:
+                print(f"{record['draft_id']}: the draft failed the checks and was not kept:")
+                for reason in record["reasons"]:
+                    print(f"  - {reason}")
+        elif args.command == "skill-drafts":
+            drafts = service.list_skill_drafts()
+            if args.draft_id:
+                found = next((d for d in drafts if d["draft_id"] == args.draft_id), None)
+                if found is None:
+                    print(f"error: no draft {args.draft_id}", file=sys.stderr)
+                    return 2
+                print(found.get("text") or "\n".join(found.get("reasons", [])))
+            for d in [] if args.draft_id else drafts:
+                print(f"{d['draft_id']}  {d['event']:<18} {d.get('name', '-'):<32} from {d['run_id']}")
+        elif args.command in ("approve-skill", "reject-skill"):
+            decision = "approved" if args.command == "approve-skill" else "rejected"
+            record = service.review_skill(args.draft_id, decision, args.operator, args.comment)
+            print(f"{args.draft_id}: {decision} by {args.operator}" + (f"; installed at {record['path']}"
+                                                                       if decision == "approved" else ""))
+            if decision == "approved":
+                print("Disclose new skills in LLM evaluation reports (CLAUDE.md).")
         elif args.command == "metrics":
             from hpc_agent import metrics
 
@@ -342,6 +385,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"audit.jsonl: {service.audit.verify()} records, chain OK")
             print(f"approvals.jsonl: {service.approvals.verify()} records, chain OK")
             print(f"explanations.jsonl: {service.explanations.verify()} records, chain OK")
+            print(f"skill-drafts.jsonl: {service.skill_drafts.verify()} records, chain OK")
             files, events = service.verify_traces()
             print(f"traces/: {files} run trace(s), {events} events, chains OK")
     except (KeyError, ValueError, PermissionError, AuditIntegrityError, LLMConfigError) as error:

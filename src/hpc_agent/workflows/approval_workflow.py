@@ -17,11 +17,14 @@ from __future__ import annotations
 
 import os
 import re
+import uuid
+from datetime import UTC, datetime
 from collections.abc import Mapping
 from pathlib import Path
 
 from hpc_agent.data_adapter import ALLOWED_DIRS, ReadOnlyDataAdapter, default_data_root
 from hpc_agent.llm.explainer import Explanation, explain
+from hpc_agent.llm.skill_writer import DraftRejected, write_draft
 from hpc_agent.llm.provider import ChatLLM, LLMProvider
 from hpc_agent.logging.audit_logger import AppendOnlyLog
 from hpc_agent.models import (
@@ -38,6 +41,7 @@ from hpc_agent.models.approval import HUMAN_DECISION_STATUSES, AgentReasoning, i
 from hpc_agent.safety.approval import InvalidTransitionError, transition
 from hpc_agent.safety.policy import Operation, SafetyPolicy
 from hpc_agent.tools.gateway import ToolGateway
+from hpc_agent.runtime.skills import SkillError, SkillLibrary
 from hpc_agent.runtime.trace import TraceRecorder
 from hpc_agent.workflows.diagnostic_workflow import run_diagnosis
 
@@ -136,6 +140,7 @@ class ApprovalService:
         gateway: ToolGateway,
         scopes: Mapping[str, frozenset[str]] | None = None,
         reasoning_llm: ChatLLM | None = None,
+        skills_root: Path | None = None,
     ) -> None:
         resolved = state_dir.resolve()
         data_root = adapter.root
@@ -149,6 +154,8 @@ class ApprovalService:
         self.approvals = AppendOnlyLog(resolved / "approvals.jsonl")
         self.audit = AppendOnlyLog(resolved / "audit.jsonl")
         self.explanations = AppendOnlyLog(resolved / "explanations.jsonl")
+        self.skill_drafts = AppendOnlyLog(resolved / "skill-drafts.jsonl")
+        self._skills_root = skills_root or data_root  # an approved skill goes to <skills_root>/skills/
         self._traces = resolved / "traces"
 
     # --- diagnosis -----------------------------------------------------------------
@@ -252,6 +259,78 @@ class ApprovalService:
         self.runs.load(run_id)  # validates the run id
         found = [r for r in self.explanations.records() if r.get("run_id") == run_id]
         return Explanation.model_validate(found[-1]) if found else None
+
+    # --- skill drafts: the agent proposes, a human approves ------------------------------
+    def draft_skill(self, run_id: str, provider: LLMProvider, operator: str | None = None) -> dict:
+        """Ask the LLM to draft a skill from a run a human APPROVED. Never touches skills/."""
+        SafetyPolicy().require(Operation.DRAFT_SKILL)
+        run = self.runs.load(run_id)
+        approved = [r for r in self.history(run_id) if r.status is S.APPROVED]
+        if not approved or self.status(run_id).status not in (S.APPROVED, S.CLOSED):
+            raise InvalidTransitionError(f"{run_id}: a skill can only be drafted from a run a human approved")
+        record = {"event": "drafted", "draft_id": f"draft-{uuid.uuid4().hex[:12]}", "run_id": run_id,
+                  "incident_id": run.incident_id, "requested_by": operator, "provider": provider.name,
+                  "model": provider.model, "at": datetime.now(UTC).isoformat()}
+        try:
+            draft = write_draft(run, approved[-1].operator_comment, provider, SkillLibrary.load(self._skills_root))
+            record |= {"name": draft.name, "agents": list(draft.agents), "text": draft.text}
+        except DraftRejected as error:
+            record |= {"event": "rejected_by_checks", "reasons": error.reasons}
+        self.skill_drafts.append(record)
+        self._audit_skill(record, operator, record.get("name") or "; ".join(record.get("reasons", []))[:500])
+        return record
+
+    def list_skill_drafts(self) -> list[dict]:
+        """The latest state of each draft (drafted, approved, rejected or rejected_by_checks)."""
+        latest: dict[str, dict] = {}
+        for record in self.skill_drafts.records():
+            latest[record["draft_id"]] = {**latest.get(record["draft_id"], {}), **record}
+        return list(latest.values())
+
+    def review_skill(self, draft_id: str, decision: str, operator: str, comment: str = "") -> dict:
+        """A human approves (copies the draft into skills/) or rejects a pending draft."""
+        SafetyPolicy().require(Operation.RECORD_HUMAN_DECISION)
+        if decision not in ("approved", "rejected"):
+            raise ValueError("decision must be approved or rejected")
+        if not is_human_operator(operator):
+            raise ValueError("a skill can only be approved or rejected by a human operator")
+        if decision == "rejected" and not comment.strip():
+            raise ValueError("rejecting a draft requires a comment explaining why")
+        draft = next((d for d in self.list_skill_drafts() if d["draft_id"] == draft_id), None)
+        if draft is None or draft["event"] != "drafted":
+            raise InvalidTransitionError(f"{draft_id}: no pending draft with that id")
+        record = {"event": decision, "draft_id": draft_id, "operator": operator, "comment": comment,
+                  "at": datetime.now(UTC).isoformat()}
+        if decision == "approved":
+            record["path"] = self._install_skill(draft)
+        self.skill_drafts.append(record)
+        self._audit_skill({**draft, **record}, operator, comment)
+        return {**draft, **record}
+
+    def _install_skill(self, draft: dict) -> str:
+        domain = draft["agents"][0].removesuffix("-agent")
+        target = self._skills_root / "skills" / domain / draft["name"] / "SKILL.md"
+        if target.exists():
+            raise InvalidTransitionError(f"skill {draft['name']!r} already exists")
+        target.parent.mkdir(parents=True, exist_ok=False)
+        target.write_text(draft["text"], encoding="utf-8")
+        try:
+            SkillLibrary.load(self._skills_root)  # the whole library must still load
+        except SkillError:
+            target.unlink()
+            target.parent.rmdir()
+            raise
+        return target.relative_to(self._skills_root).as_posix()
+
+    def _audit_skill(self, record: dict, operator: str | None, note: str) -> None:
+        now = datetime.now(UTC)
+        status = self.status(record["run_id"]).status
+        self.audit.append(AuditRecord(
+            run_id=record["run_id"], incident_id=record["incident_id"], start_time=now, end_time=now,
+            workflow_stage=status, approval_status=status, agents_invoked=["skill-writer"],
+            diagnosis=f"skill draft {record['draft_id']}: {record['event']}", operator=operator,
+            operator_comment=note[:500],
+        ).model_dump(mode="json"))
 
     # --- human decisions -----------------------------------------------------------
     def decide(self, run_id: str, decision: ApprovalStatus, operator: str, comment: str = "") -> ApprovalRecord:
