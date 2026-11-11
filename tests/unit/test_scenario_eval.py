@@ -104,3 +104,98 @@ def test_model_failures_are_reported_apart_from_rule_fallbacks(tmp_path):
     assert log.model_complete is False and not log.error
     assert any(f.startswith("triage-agent") for f in log.fallbacks)
     assert "Model completion: **0 of 1**" in render_log_section(logs, results)
+
+
+# --- regression checks for the independent acceptance review (R1-R3) -----------------------------
+from hpc_agent.evaluation.report import render_markdown  # noqa: E402
+from tests.safety.test_llm_agents import FakeLLM, answer  # noqa: E402
+
+
+def working_llm():
+    return FakeLLM({"triage": [answer(domains=[{"domain": "scheduler", "items": ["I1"]}], primary="scheduler")],
+                    "scheduler": [answer(hypotheses=[])]})
+
+
+def failing_second(monkeypatch, error):
+    real = scenarios.run_diagnosis
+
+    def run(incident, *args, **kwargs):
+        if incident.incident_id == "SIM-E-002":
+            raise error
+        return real(incident, *args, **kwargs)
+
+    monkeypatch.setattr(scenarios, "run_diagnosis", run)
+
+
+def completion(logs, results):
+    section = render_log_section(logs, results)
+    return section.split("Model completion: **", 1)[1].split("**", 1)[0]
+
+
+def test_r1_completion_counts_a_timed_out_case(tmp_path, monkeypatch):
+    failing_second(monkeypatch, TimeoutError("no answer"))
+    results, _, logs = evaluate_scenarios(make(tmp_path), llm=working_llm())
+    assert completion(logs, results) == "1 of 2"
+
+
+def test_r1_completion_counts_an_import_rejection(tmp_path):
+    directory = make(tmp_path)
+    with (directory / "export" / "SIM-E-002" / "logs" / "syslog").open("a") as handle:
+        handle.write("2026-03-02T05:00:00.000000+00:00 sim-node-0001 app: password=hunter2hunter2\n")
+    results, _, logs = evaluate_scenarios(directory, llm=working_llm())
+    assert completion(logs, results) == "1 of 2"
+
+
+def test_r1_completion_when_every_case_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr(scenarios, "run_diagnosis", lambda *a, **k: (_ for _ in ()).throw(TimeoutError("x")))
+    results, _, logs = evaluate_scenarios(make(tmp_path), llm=working_llm())
+    assert completion(logs, results) == "0 of 2"
+
+
+class MeteredLLM:
+    """Stands in for the Claude provider's usage counter; never sends anything."""
+    name, model = "anthropic", "metered"
+
+    def __init__(self):
+        self.usage = {"requests": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
+
+
+def test_r2_an_interrupted_case_keeps_its_trace_time_and_usage(tmp_path, monkeypatch):
+    llm, real = MeteredLLM(), scenarios.run_diagnosis
+
+    def run(incident, gateway, scopes, llm=None, trace=None):
+        llm.usage["requests"] += 1
+        if incident.incident_id == "SIM-E-002":
+            trace.record("scheduler-agent", "model_reply", content="partial")
+            raise KeyboardInterrupt()
+        return real(incident, gateway, scopes, trace=trace)
+
+    monkeypatch.setattr(scenarios, "run_diagnosis", run)
+    with pytest.raises(KeyboardInterrupt):
+        evaluate_scenarios(make(tmp_path), llm=llm, runs_dir=tmp_path / "runs")
+    runs = tmp_path / "runs"
+    record = json.loads((runs / "SIM-E-002.run.json").read_text())
+    assert record["status"] == "interrupted" and record["wall_seconds"] >= 0 and record["run"] is None
+    assert "partial" in (runs / "SIM-E-002.trace.jsonl").read_text()
+    progress = [json.loads(x) for x in (runs / "progress.jsonl").read_text().splitlines()]
+    assert [p["status"] for p in progress] == ["completed", "interrupted"]
+    assert progress[-1]["claude_usage"]["requests"] == 2  # the latest known usage, not reset
+    m = json.loads((runs / "manifest.json").read_text())
+    assert m["status"] == "interrupted" and m["active_case"] == "SIM-E-002" and m["pending_cases"] == []
+
+
+def test_r3_sensitive_exception_text_never_reaches_any_output(tmp_path, monkeypatch):
+    failing_second(monkeypatch, RuntimeError("login failed password=hunter2hunter2"))
+    results, summary, logs = evaluate_scenarios(make(tmp_path), runs_dir=tmp_path / "runs")
+    outputs = [json.dumps([r.model_dump() for r in results]), json.dumps([r.model_dump() for r in logs]),
+               render_markdown(results, summary) + render_log_section(logs, results)]
+    outputs += [p.read_text() for p in (tmp_path / "runs").iterdir()]
+    assert not any("hunter2" in text for text in outputs)
+    assert next(r for r in logs if r.case_id == "SIM-E-002").error == \
+        "RuntimeError: SENSITIVE INFORMATION DETECTED AND NOT PROCESSED."
+
+
+def test_r3_ordinary_exception_text_is_kept(tmp_path, monkeypatch):
+    failing_second(monkeypatch, TimeoutError("model did not answer within 900 s"))
+    _, _, logs = evaluate_scenarios(make(tmp_path))
+    assert next(r for r in logs if r.case_id == "SIM-E-002").error == "TimeoutError: model did not answer within 900 s"

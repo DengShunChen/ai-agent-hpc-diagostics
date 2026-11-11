@@ -36,6 +36,7 @@ from hpc_agent.llm.provider import ChatLLM
 from hpc_agent.simulate.catalog import EVIDENCE
 from hpc_agent.simulate.scenario import Labels
 from hpc_agent.runtime.trace import TraceRecorder
+from hpc_agent.safety.secrets import find_credential_like
 from hpc_agent.tools.gateway import build_default_gateway
 from hpc_agent.workflows.diagnostic_workflow import run_diagnosis
 
@@ -85,7 +86,7 @@ def _failed(case: Case, reason: str, seconds: float) -> CaseResult:
     """A case that did not finish: outcome "failed", wrong on every case-level metric, real time kept.
     Metrics computed over output hypotheses (evidence quality) have no hypotheses to count for it."""
     exp = case.expected
-    return CaseResult(case_id=case.case_id, description=f"{case.description}; FAILED: {reason[:80]}",
+    return CaseResult(case_id=case.case_id, description=f"{case.description}; FAILED: {safe_text(reason, 80)}",
                       label_source=case.label_source, classification="error", classification_correct=False,
                       expected_outcome=exp.outcome, outcome="failed", outcome_correct=False, leading_category=None,
                       leading_cause=None, leading_confidence=0.0,
@@ -94,6 +95,19 @@ def _failed(case: Case, reason: str, seconds: float) -> CaseResult:
                       tool_backed_hypotheses=0, unsupported_claims=[], missing_required=len(exp.required_missing),
                       missing_found=0, facts_reported=0, facts_tool=0, references=0, proposed_actions=0,
                       duration_ms=seconds * 1000)
+
+
+SENSITIVE = "SENSITIVE INFORMATION DETECTED AND NOT PROCESSED."
+
+
+def safe_text(text: str, limit: int = 200) -> str:
+    """Error and fallback text as it may be written to records and reports: credential-like content withheld."""
+    text = " ".join(str(text).split())[:limit]
+    return SENSITIVE if find_credential_like(text) else text
+
+
+def safe_error(error: BaseException) -> str:
+    return f"{type(error).__name__}: {safe_text(str(error))}"
 
 
 class BatchInvalid(ValueError):
@@ -173,6 +187,8 @@ def evaluate_scenarios(
     state = {**(run_manifest or {}), "status": "running", "planned_cases": sorted(labels)}
     _write_manifest(runs_dir, state)
     results, logs = [], []
+    active: tuple | None = None
+    batch_started = time.monotonic()
     try:
         with tempfile.TemporaryDirectory(prefix="hpc-agent-scenarios-") as tmp:
             root = Path(tmp) / "root"
@@ -180,7 +196,9 @@ def evaluate_scenarios(
             (root / "fixtures").mkdir(parents=True)
             (root / "fixtures" / "DATA_CLASS.json").write_text(json.dumps({"class": "synthetic"}))
             pseudonymizer = Pseudonymizer(SIMULATION_KEY)
+            import_started = time.monotonic()
             report = import_export(RawExportAdapter(directory / "export"), root, pseudonymizer)
+            state["import_wall_seconds"] = round(time.monotonic() - import_started, 3)
             adapter = ReadOnlyDataAdapter(root)
             if getattr(llm, "name", None) == "anthropic":
                 from hpc_agent.llm.claude import cloud_data_problem
@@ -199,10 +217,12 @@ def evaluate_scenarios(
                 base = dict(case_id=scenario_id, fault=label.fault, total_lines=label.total_lines,
                             key_lines=len(label.key_lines), evidence=EVIDENCE.get(label.fault, ""),
                             platform=label.platform, group=group_of(label.fault),
-                            component_hit=False if label.components else None)
+                            component_hit=False if label.components else None,
+                            model_complete=None if llm is None else False)  # a failed case did not complete
                 trace, started = TraceRecorder(), time.monotonic()
+                active = (scenario_id, trace, started)
                 if scenario_id in report.rejected:
-                    error = f"import rejected: {report.rejected[scenario_id]}"
+                    error = f"import rejected: {safe_text(report.rejected[scenario_id])}"
                     results.append(_failed(case, error, 0.0))
                     logs.append(LogResult(**base, key_lines_cited=0, log_searches=0, error=error))
                     _keep(runs_dir, scenario_id, None, trace, 0.0, error, llm)
@@ -212,7 +232,7 @@ def evaluate_scenarios(
                                         llm=llm, trace=trace)
                 except Exception as error:  # noqa: BLE001 - a failed case is recorded, never dropped
                     seconds = time.monotonic() - started
-                    reason = f"{type(error).__name__}: {str(error)[:200]}"
+                    reason = safe_error(error)
                     results.append(_failed(case, reason, seconds))
                     logs.append(LogResult(**base, key_lines_cited=0, log_searches=0, error=reason))
                     _keep(runs_dir, scenario_id, None, trace, seconds, reason, llm)
@@ -224,24 +244,35 @@ def evaluate_scenarios(
                 cited = _cited(run, pseudonymizer)
                 wanted = {(source, None if source in SCHEDULER_LOGS else pseudonymizer.pseudonym("node", node), int(line))
                           for source, node, line in (key.split(":") for key in label.key_lines)}
-                fallbacks = ([f"triage-agent: {run.triage.reasoning_note}"] if run.triage.reasoning == "rules-fallback"
-                             else []) + [f"{d.agent}: {d.reasoning_note}" for d in run.diagnoses
-                                         if d.reasoning == "rules-fallback"]
+                fallbacks = ([f"triage-agent: {safe_text(run.triage.reasoning_note)}"]
+                             if run.triage.reasoning == "rules-fallback" else []) + [
+                    f"{d.agent}: {safe_text(d.reasoning_note)}" for d in run.diagnoses if d.reasoning == "rules-fallback"]
                 logs.append(LogResult(**{**base, "component_hit": (bool(lead) and bool(faulty & set(lead.components)))
-                                         if faulty else None},
+                                         if faulty else None,
+                                         "model_complete": None if llm is None else not fallbacks},
                                       key_lines_cited=len(wanted & cited),
                                       log_searches=sum(t.tool == "get_log_lines" for t in run.tools_invoked),
                                       log_analyses=sum(t.tool == "analyze_logs" for t in run.tools_invoked),
                                       consults=sum(d.consulted_by is not None for d in run.diagnoses),
-                                      fallbacks=fallbacks,
-                                      model_complete=None if llm is None else not fallbacks))
-    except BaseException:
+                                      fallbacks=fallbacks))
+                active = None
+    except BaseException as error:
+        if active is not None:  # keep what the interrupted case had: its trace, time and the usage known so far
+            scenario_id, trace, started = active
+            _keep(runs_dir, scenario_id, None, trace, time.monotonic() - started, safe_error(error), llm,
+                  status="interrupted")
         state["status"] = "interrupted"
-        _write_manifest(runs_dir, {**state, "finished_cases": len(results)})
+        _write_manifest(runs_dir, {**state, "finished_cases": len(results),
+                                   "active_case": active[0] if active else None,
+                                   "pending_cases": sorted(labels)[len(results) + (1 if active else 0):],
+                                   "batch_wall_seconds": round(time.monotonic() - batch_started, 3)})
         raise
     state["status"] = "complete"
     _write_manifest(runs_dir, {**state, "finished_cases": len(results),
-                               "failed_cases": sum(bool(r.error) for r in logs)})
+                               "failed_cases": sum(bool(r.error) for r in logs),
+                               "batch_wall_seconds": round(time.monotonic() - batch_started, 3),
+                               "timing_note": "per-case wall_seconds are the diagnosis stage only; the batch import "
+                                              "is import_wall_seconds; batch_wall_seconds covers the whole batch"})
     return results, summarize(results), logs
 
 
@@ -257,14 +288,15 @@ def _pseudonymize_component(component: str, pseudonymizer: Pseudonymizer) -> str
 
 
 def _keep(runs_dir: Path | None, scenario_id: str, run, trace: TraceRecorder, seconds: float, error: str,
-          llm: ChatLLM | None = None) -> None:
+          llm: ChatLLM | None = None, status: str | None = None) -> None:
     """<id>.run.json (the DiagnosticRun, or the error), <id>.trace.jsonl, and a line in progress.jsonl."""
     if runs_dir is None:
         return
     record_path = runs_dir / f"{scenario_id}.run.json"
     if record_path.exists():
         raise FileExistsError(f"refusing to overwrite {record_path}")
-    record = {"scenario_id": scenario_id, "wall_seconds": round(seconds, 3), "error": error,
+    status = status or ("failed" if error else "completed")
+    record = {"scenario_id": scenario_id, "status": status, "wall_seconds": round(seconds, 3), "error": error,
               "run": run.model_dump(mode="json") if run is not None else None}
     record_path.write_text(json.dumps(record, indent=1), encoding="utf-8")
     with (runs_dir / f"{scenario_id}.trace.jsonl").open("x", encoding="utf-8") as handle:
@@ -272,7 +304,7 @@ def _keep(runs_dir: Path | None, scenario_id: str, run, trace: TraceRecorder, se
             handle.write(json.dumps(event, ensure_ascii=False, default=str) + "\n")
     usage = dict(getattr(llm, "usage", {}) or {}) if getattr(llm, "name", None) == "anthropic" else None
     with (runs_dir / "progress.jsonl").open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps({"scenario_id": scenario_id, "status": "failed" if error else "completed",
+        handle.write(json.dumps({"scenario_id": scenario_id, "status": status,
                                  "wall_seconds": round(seconds, 3), "claude_usage": usage,
                                  "at": datetime.now(UTC).isoformat()}) + "\n")
 
@@ -347,9 +379,10 @@ def render_log_section(logs: list[LogResult], results: list | None = None) -> st
         llm_rows = [r for r in logs if r.model_complete is not None]
         if llm_rows:
             clean = [r for r in llm_rows if r.model_complete]
-            lines += ["", f"Model completion: **{len(clean)} of {len(llm_rows)}** cases ran with no agent falling back to "
-                      f"rules. On those cases only, category top-1: **{count(clean, lambda r: by_id[r.case_id].leading_correct)}**. "
-                      "The rows above include fallback cases (the whole system as deployed)."]
+            lines += ["", f"Model completion: **{len(clean)} of {len(llm_rows)}** planned cases ran with no agent falling "
+                      "back to rules (failed cases count as not completed). On the completed cases only, category top-1: "
+                      f"**{count(clean, lambda r: by_id[r.case_id].leading_correct)}** (a conditional subset, not a "
+                      "replacement for the rows above, which include fallback and failed cases)."]
     kinds = sorted({r.evidence for r in logs if r.evidence})
     if kinds and results:
         top1 = {r.case_id: r.leading_correct for r in results}
