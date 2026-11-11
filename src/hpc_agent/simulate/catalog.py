@@ -185,7 +185,7 @@ def memory_ecc_node_down(w: World) -> dict:
         sched(w, w.jitter(j.end, 0.001, 0.01), f"_job_complete: JobId={j.job_id} done")
     w.user_report = f"job {j.job_id} failed with NODE_FAIL" if w.p.name != "tcs-fx1000" else \
         f"job {j.job_id} ended abnormally; pjstat shows it was killed"
-    return dict(classification=["scheduler", "multi-domain"], outcome="supported_hypothesis",
+    return dict(components=[f"node:{node}"], classification=["scheduler", "multi-domain"], outcome="supported_hypothesis",
                 leading=["node.unhealthy"], forbidden=["application.crash", "scheduler.walltime"])
 
 
@@ -210,7 +210,7 @@ def gpu_xid79(w: World) -> dict:
           key=True)
     w.gpus[node][gpu].temperature_c = 0
     w.user_report = f"training job {w.job.job_id} crashed: 'RuntimeError: CUDA error: unspecified launch failure'"
-    return dict(classification=["gpu", "multi-domain"], outcome="supported_hypothesis",
+    return dict(components=[f"node:{node}"], classification=["gpu", "multi-domain"], outcome="supported_hypothesis",
                 leading=["gpu.hardware"], forbidden=["gpu.application"])
 
 
@@ -223,7 +223,7 @@ def gpu_xid48(w: World) -> dict:
           f"kernel: NVRM: Xid (PCI:{pci}): 63, pid='<unknown>', name=<unknown>, Row Remapper: New row "
           "(0x00000000000a3f12) marked for remapping, reset gpu to activate.")
     w.user_report = f"job {w.job.job_id} failed: 'CUDA error: uncorrectable ECC error encountered'"
-    return dict(classification=["gpu", "multi-domain"], outcome="supported_hypothesis",
+    return dict(components=[f"node:{node}"], classification=["gpu", "multi-domain"], outcome="supported_hypothesis",
                 leading=["gpu.hardware"], forbidden=["gpu.application"])
 
 
@@ -263,7 +263,7 @@ def ib_flap_lustre(w: World) -> dict:
     job_start(w)
     job_end(w, "exit")
     w.user_report = f"job {j.job_id} failed: 'OSError: [Errno 5] Input/output error' while writing a checkpoint"
-    return dict(classification=["network", "multi-domain"], outcome="supported_hypothesis",
+    return dict(components=[f"node:{node}"], classification=["network", "multi-domain"], outcome="supported_hypothesis",
                 leading=["network.link_flap", "network.link_down"], forbidden=["storage.capacity"])
 
 
@@ -283,7 +283,7 @@ def ost_full(w: World) -> dict:
     job_start(w)
     job_end(w, "exit")
     w.user_report = f"job {j.job_id} failed: 'OSError: [Errno 28] No space left on device'"
-    return dict(classification=["storage", "multi-domain"], outcome="supported_hypothesis",
+    return dict(components=[f"ost:{ost}"], classification=["storage", "multi-domain"], outcome="supported_hypothesis",
                 leading=["storage.capacity"], forbidden=["network.link_flap", "network.link_down"])
 
 
@@ -300,7 +300,7 @@ def ost_imbalance(w: World) -> dict:
     job_start(w)
     job_end(w, "exit")
     w.user_report = f"job {j.job_id} failed writing output although lfs df shows plenty of free space overall"
-    return dict(classification=["storage", "multi-domain"], outcome="supported_hypothesis",
+    return dict(components=[f"ost:{o}" for o in hot], classification=["storage", "multi-domain"], outcome="supported_hypothesis",
                 leading=["storage.ost_imbalance", "storage.capacity"], forbidden=[])
 
 
@@ -336,7 +336,7 @@ def slow_node_walltime(w: World) -> dict:
     job_end(w, "signal")
     w.user_report = (f"job {j.job_id} usually finishes in about {j.timelimit.seconds // 7200} hours; this time it ran "
                      "into the time limit with the same input")
-    return dict(classification=["scheduler", "multi-domain"], outcome="supported_hypothesis",
+    return dict(components=[f"node:{node}"], classification=["scheduler", "multi-domain"], outcome="supported_hypothesis",
                 leading=["node.unhealthy"], forbidden=["application.crash", "storage.capacity"])
 
 
@@ -354,7 +354,7 @@ def link_degraded_mpi(w: World) -> dict:
     job_end(w, "exit")
     w.user_report = (f"job {j.job_id} aborted in the middle of a run: MPI reported a communication error "
                      f"('{launcher(w)}: error: rank 37 lost connection')")
-    return dict(classification=["network", "multi-domain"], outcome="supported_hypothesis",
+    return dict(components=[f"node:{node}"], classification=["network", "multi-domain"], outcome="supported_hypothesis",
                 leading=["network.packet_errors"], forbidden=["network.link_down", "storage.capacity"])
 
 
@@ -403,7 +403,7 @@ def gpu_pcie_aer(w: World) -> dict:
     job_start(w)
     job_end(w, "exit")
     w.user_report = f"training job {j.job_id} failed: 'NCCL error: unhandled system error'"
-    return dict(classification=["gpu", "multi-domain"], outcome="supported_hypothesis",
+    return dict(components=[f"node:{node}"], classification=["gpu", "multi-domain"], outcome="supported_hypothesis",
                 leading=["gpu.interconnect"], forbidden=["gpu.application"])
 
 
@@ -424,7 +424,7 @@ def clock_skew_auth(w: World) -> dict:
     job_start(w)
     job_end(w, "exit")
     w.user_report = f"job {j.job_id} fails within seconds of starting, every time it lands on the same node"
-    return dict(classification=["scheduler", "multi-domain"], outcome="supported_hypothesis",
+    return dict(components=[f"node:{node}"], classification=["scheduler", "multi-domain"], outcome="supported_hypothesis",
                 leading=["node.unhealthy"], forbidden=["application.crash", "application.exit_code"])
 
 

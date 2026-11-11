@@ -199,7 +199,7 @@ def generate(sc: Scenario, out: Path) -> Labels:
     labels = Labels(scenario_id=sc.scenario_id, fault=sc.fault, classification=spec["classification"],
                     outcome=spec["outcome"], leading_categories=spec["leading"],
                     forbidden_categories=spec["forbidden"], required_missing=spec.get("required_missing", []),
-                    key_lines=key_lines, total_lines=total)
+                    key_lines=key_lines, total_lines=total, components=spec.get("components", []))
     _write(out / "labels" / f"{sc.scenario_id}.json", [labels.model_dump_json(indent=2)])
     return labels
 

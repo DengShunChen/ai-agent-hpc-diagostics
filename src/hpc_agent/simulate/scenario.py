@@ -76,6 +76,9 @@ class Labels(BaseModel):
     # The injected lines that show the root cause: "source:node:line" (line numbers after rendering).
     key_lines: list[str] = Field(default_factory=list)
     total_lines: int = 0
+    # The faulty infrastructure components ("node:<name>", "ost:<id>"). Empty for job or application faults
+    # (OOM, segfault, walltime, cancel, application XID), where the node the job ran on is not at fault.
+    components: list[str] = Field(default_factory=list)
 
 
 def load_scenarios(directory: Path) -> list[Scenario]:
@@ -102,3 +105,26 @@ def random_scenarios(seed: int, count: int, prefix: str = "SIM-BLIND", platform:
             hours=rng.choice((4.0, 6.0, 8.0)),
         ))
     return out
+
+
+def stratified_scenarios(seed: int, per_fault: int, faults: tuple[str, ...] = FAULTS,
+                         platforms: tuple[str, ...] = ("slurm-x86",), prefix: str = "SIM-BLIND") -> list[Scenario]:
+    """A blind set with exactly `per_fault` scenarios of every fault on every platform, in shuffled order.
+
+    Everything else (seed, distractors, sizes, time) is drawn at random, so every fault type is in the
+    denominator and no type is left out by chance."""
+    rng = random.Random(seed)
+    cells = [(platform, fault) for platform in platforms for fault in faults for _ in range(per_fault)]
+    rng.shuffle(cells)
+    return [Scenario(
+        scenario_id=f"{prefix}-{i + 1:03d}",
+        seed=rng.randrange(1, 2**31),
+        fault=fault,
+        platform=platform,
+        distractors=rng.sample(DISTRACTORS, rng.randint(1, 3)),
+        nodes=rng.choice((8, 16, 24, 32)),
+        gpu_nodes=rng.choice((2, 4, 8)),
+        osts=rng.choice((4, 8, 12)),
+        start=datetime(2026, 3, 2, tzinfo=UTC) + timedelta(days=rng.randint(0, 60), hours=rng.randint(0, 23)),
+        hours=rng.choice((4.0, 6.0, 8.0)),
+    ) for i, (platform, fault) in enumerate(cells)]

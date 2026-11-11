@@ -22,7 +22,8 @@
     hpc-agent reject-skill DRAFT-ID --operator NAME --comment TEXT
     hpc-agent compare-pilot FILE.csv [--min-n 10]     baseline vs assisted localization time / MTTR
     hpc-agent import-export DIR --output DATA_ROOT [--adapter csv|raw] [--dry-run]   validate + de-identify an export
-    hpc-agent simulate (--scenarios DIR | --blind-seed N --count K [--faults novel]) --output DIR   simulated logs
+    hpc-agent simulate (--scenarios DIR | --blind-seed N (--count K | --per-fault N) [--faults known|novel|all]
+                       [--platform slurm-x86|tcs-fx1000|both]) --output DIR   simulated logs
     hpc-agent evaluate --scenarios DIR [--reasoning llm]   score simulated scenarios (DIR from simulate)
 
 Decisions are recorded only; nothing is ever executed. On the CLI, --operator is an asserted
@@ -32,6 +33,7 @@ identity; the HTTP API instead derives the operator from an authenticated bearer
 from __future__ import annotations
 
 import argparse
+from datetime import UTC, datetime
 import json
 import os
 import sys
@@ -107,7 +109,10 @@ def _parser() -> argparse.ArgumentParser:
     sim.add_argument("--count", type=int, default=20, help="blind set size")
     sim.add_argument("--faults", choices=("known", "novel", "all"), default="known",
                      help="blind set fault pool: known (default), novel (not encoded in the rules) or all")
-    sim.add_argument("--platform", choices=("slurm-x86", "tcs-fx1000"), default="slurm-x86", help="blind set platform")
+    sim.add_argument("--platform", choices=("slurm-x86", "tcs-fx1000", "both"), default="slurm-x86",
+                     help="blind set platform")
+    sim.add_argument("--per-fault", type=int, default=None,
+                     help="stratified blind set: exactly N scenarios per fault and platform (instead of --count)")
     sim.add_argument("--output", type=Path, required=True, help="new directory outside the repository")
     explain = sub.add_parser("explain", help="ask the local LLM to explain a run's evidence")
     explain.add_argument("run_id")
@@ -126,6 +131,8 @@ def _parser() -> argparse.ArgumentParser:
                           help="approvals.jsonl with real human decisions (for the override rate)")
     evaluate.add_argument("--output", type=Path, default=None, help="write the Markdown report here")
     evaluate.add_argument("--json", type=Path, default=None, help="write per-case results as JSON here")
+    evaluate.add_argument("--runs-dir", type=Path, default=None,
+                          help="scenarios: keep each case's DiagnosticRun and trace, and a manifest.json, here")
     evaluate.add_argument("--reasoning", choices=("rules", "llm"), default="rules",
                           help="llm: diagnose with the LLM-driven agents (needs MODEL_PROVIDER; slow on CPU)")
     return parser
@@ -197,7 +204,19 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             from hpc_agent.simulate.scenario import ALL_FAULTS, FAULTS, NOVEL_FAULTS
             pool = {"known": FAULTS, "novel": NOVEL_FAULTS, "all": ALL_FAULTS}[args.faults]
-            scenarios = random_scenarios(args.blind_seed, args.count, platform=args.platform, faults=pool)
+            platforms = ("slurm-x86", "tcs-fx1000") if args.platform == "both" else (args.platform,)
+            if args.per_fault is not None:
+                from hpc_agent.simulate.scenario import stratified_scenarios
+
+                if not 1 <= args.per_fault <= 10:
+                    print("error: --per-fault must be 1-10", file=sys.stderr)
+                    return 2
+                scenarios = stratified_scenarios(args.blind_seed, args.per_fault, faults=pool, platforms=platforms)
+            elif len(platforms) > 1:
+                print("error: --platform both needs --per-fault", file=sys.stderr)
+                return 2
+            else:
+                scenarios = random_scenarios(args.blind_seed, args.count, platform=args.platform, faults=pool)
         from hpc_agent.evaluation.scenarios import write_name_map
 
         for scenario in scenarios:
@@ -227,11 +246,14 @@ def main(argv: list[str] | None = None) -> int:
             if llm is None:
                 print("error: --reasoning llm needs MODEL_PROVIDER=ollama and MODEL_NAME", file=sys.stderr)
                 return 2
-        log_section = ""
+        log_section, logs = "", []
         if args.scenarios:
             from hpc_agent.evaluation.scenarios import evaluate_scenarios, render_log_section
 
-            results, summary, logs = evaluate_scenarios(args.scenarios, llm=llm)
+            from hpc_agent.evaluation.scenarios import manifest
+
+            run_manifest = manifest(args.scenarios, llm)
+            results, summary, logs = evaluate_scenarios(args.scenarios, llm=llm, runs_dir=args.runs_dir)
             if llm is not None:
                 from hpc_agent.runtime.skills import SkillLibrary
 
@@ -246,7 +268,14 @@ def main(argv: list[str] | None = None) -> int:
             args.output.write_text(report, encoding="utf-8")
         if args.json:
             args.json.write_text(json.dumps({"summary": summary.model_dump(),
-                                             "cases": [r.model_dump() for r in results]}, indent=2))
+                                             "cases": [r.model_dump() for r in results],
+                                             "logs": [r.model_dump() for r in logs] if args.scenarios else []},
+                                            indent=2))
+        if args.scenarios and args.runs_dir:
+            usage = getattr(llm, "usage", None) if getattr(llm, "name", None) == "anthropic" else None
+            run_manifest |= {"finished_at": datetime.now(UTC).isoformat(), "cases": len(results),
+                             "failed": sum(bool(r.error) for r in logs), "claude_usage": usage}
+            (args.runs_dir / "manifest.json").write_text(json.dumps(run_manifest, indent=2), encoding="utf-8")
         print(report)
         return 0
 

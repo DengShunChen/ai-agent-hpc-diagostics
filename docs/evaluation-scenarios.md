@@ -104,8 +104,10 @@ node's job really did hit its time limit, so `scheduler.walltime` is not forbidd
 - The background noise contains routine lines from the same daemons (`chronyd` "clock wrong by 0.000412
   seconds", harmless Lustre reconnects, an old recovered link flap), so a keyword hit is not an answer.
 - These scenarios will be looked at while building Phases 2-4, so later results on them are **not** an
-  independent test. A novel blind set drawn at evaluation time (`simulate --blind-seed N --faults novel`)
-  is the independent test.
+  independent test. A blind set drawn after the version is frozen (`simulate --blind-seed N --faults novel`)
+  tests **unseen instances from the same simulator and fault catalog**; it is not an independently designed
+  fault set. Independently designed cases (separate causal chains, messages and distractors, not shown to
+  the implementer before the run) are the third tier; see [evaluation-protocol.md](evaluation-protocol.md).
 
 ## What this shows
 
@@ -159,7 +161,9 @@ node's job really did hit its time limit, so `scheduler.walltime` is not forbidd
   index named the daemon); it now matches those lines by source and line number. Rules results on both
   sets are unchanged (rules don't read logs). **The 7B numbers above were measured before this fix**
   and have not been rerun.
-- Results on the dev sets after these changes are not an independent test of them. The blind set is.
+- Results on the dev sets after these changes are not an independent test of them. A blind set from the
+  same catalog tests unseen instances only; independently designed cases are the stronger test
+  ([evaluation-protocol.md](evaluation-protocol.md)).
 
 ## How to reproduce
 

@@ -197,3 +197,23 @@ def test_cited_job_manager_key_line_is_counted():
     run = SimpleNamespace(diagnoses=[SimpleNamespace(evidence=[evidence])],
                           rca=SimpleNamespace(facts=[], probable_causes=[]))
     assert _cited(run, Pseudonymizer(SIMULATION_KEY)) == {("pjm", None, 42)}
+
+
+@pytest.mark.parametrize("fault, kind", [("memory_ecc_node_down", "node"), ("gpu_xid79", "node"), ("ost_full", "ost"),
+                                         ("ost_imbalance", "ost"), ("clock_skew_auth", "node"), ("segfault", None),
+                                         ("oom_kill", None), ("gpu_xid13_app", None), ("walltime", None)])
+def test_labels_name_faulty_infrastructure_components_only(tmp_path, fault, kind):
+    labels = generate(scenario(fault), tmp_path)
+    assert ({c.split(":")[0] for c in labels.components} == {kind}) if kind else labels.components == []
+
+
+def test_stratified_blind_set_covers_every_fault_and_platform():
+    from collections import Counter
+
+    from hpc_agent.simulate.scenario import stratified_scenarios
+
+    a = stratified_scenarios(11, 2, faults=ALL_FAULTS, platforms=PLATFORMS)
+    assert a == stratified_scenarios(11, 2, faults=ALL_FAULTS, platforms=PLATFORMS)
+    cells = Counter((s.platform, s.fault) for s in a)
+    assert len(a) == 2 * len(ALL_FAULTS) * 2 and set(cells.values()) == {2}
+    assert [s.fault for s in a] != [s.fault for s in stratified_scenarios(12, 2, faults=ALL_FAULTS, platforms=PLATFORMS)]
