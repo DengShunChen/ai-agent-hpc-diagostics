@@ -1,0 +1,8 @@
+# Novel-fault development scenario (Slurm): a fault the rule-based agents do not encode. Used while
+# building Phases 2-4, so it is not an independent test; a novel blind set (simulate --faults novel) is.
+scenario_id: SIM-NOV-005
+seed: 3005
+platform: slurm-x86
+fault: clock_skew_auth
+distractors: [drained_other_node, other_job_oom]
+description: "A node lost time sync; job launches fail authentication."

@@ -93,6 +93,24 @@ class Platform:
             return "kernel: LNetError: 3511:0:(tofulnd_cb.c:1402:ktofu_check_txs()) Timed out tx: tx_queue, 6 seconds"
         return "kernel: LNetError: 3511:0:(o2iblnd_cb.c:3402:kiblnd_check_txs_locked()) Timed out tx: tx_queue, 6 seconds"
 
+    # --- novel faults (approximated on both platforms; see evaluation/scenarios/novel) -------------
+    def cpu_throttle(self, cpu: int, events: int) -> str:
+        if self.name == "tcs-fx1000":
+            return f"kernel: CPU{cpu}: thermal throttling active, core frequency limited (events={events})"
+        return f"kernel: CPU{cpu}: Core temperature above threshold, cpu clock throttled (total events = {events})"
+
+    def transport_retry(self) -> str:
+        if self.name == "tcs-fx1000":
+            return "kernel: tofu: TNI2 port C: CRC error threshold exceeded, packets retransmitted"
+        return ("kernel: infiniband mlx5_0: mlx5_handle_error_cqe:332:(pid 0): WC error: 12, "
+                "Message: transport retry counter exceeded")
+
+    def auth_error(self, node: str, job_id: int) -> str:
+        """The job manager's record of a launch rejected because of an authentication failure."""
+        if self.name == "tcs-fx1000":
+            return f"JOB {job_id} START FAILED: authentication error from node {node} (credential expired)"
+        return f"error: Munge decode failed: Expired credential; launch of JobId={job_id} on {node} failed"
+
     # --- memory error (generic Linux APEI on A64FX; EDAC on x86) -----------------------------------
     def memory_ue(self) -> list[str]:
         if self.name == "tcs-fx1000":

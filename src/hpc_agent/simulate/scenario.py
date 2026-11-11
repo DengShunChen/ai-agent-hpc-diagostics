@@ -21,8 +21,15 @@ Fault = Literal[
     "oom_kill", "segfault", "walltime", "admin_cancel", "memory_ecc_node_down",
     "gpu_xid79", "gpu_xid48", "gpu_xid13_app", "ib_flap_lustre", "ost_full", "ost_imbalance",
     "logs_missing",
+    # novel: not encoded in the rule-based agents (evaluation/scenarios/novel)
+    "slow_node_walltime", "link_degraded_mpi", "mds_slow_hang", "gpu_pcie_aer", "clock_skew_auth",
 ]
-FAULTS: tuple[str, ...] = Fault.__args__  # type: ignore[attr-defined]
+NOVEL_FAULTS: tuple[str, ...] = ("slow_node_walltime", "link_degraded_mpi", "mds_slow_hang", "gpu_pcie_aer",
+                                 "clock_skew_auth")
+ALL_FAULTS: tuple[str, ...] = Fault.__args__  # type: ignore[attr-defined]
+# The known faults, in their original order: blind sets draw from this by default, so existing seeds
+# reproduce the same scenarios.
+FAULTS: tuple[str, ...] = tuple(f for f in ALL_FAULTS if f not in NOVEL_FAULTS)
 
 Distractor = Literal[
     "other_node_xid13",       # another node logs a GPU application XID at the same time
@@ -76,15 +83,16 @@ def load_scenarios(directory: Path) -> list[Scenario]:
             for p in sorted(directory.glob("*.yaml"))]
 
 
-def random_scenarios(seed: int, count: int, prefix: str = "SIM-BLIND", platform: str = "slurm-x86") -> list[Scenario]:
-    """A blind set: faults and distractors drawn at random from the catalog."""
+def random_scenarios(seed: int, count: int, prefix: str = "SIM-BLIND", platform: str = "slurm-x86",
+                     faults: tuple[str, ...] = FAULTS) -> list[Scenario]:
+    """A blind set: faults (from `faults`, the known ones by default) and distractors drawn at random."""
     rng = random.Random(seed)
     out = []
     for i in range(count):
         out.append(Scenario(
             scenario_id=f"{prefix}-{i + 1:03d}",
             seed=rng.randrange(1, 2**31),
-            fault=rng.choice(FAULTS),
+            fault=rng.choice(faults),
             platform=platform,
             distractors=rng.sample(DISTRACTORS, rng.randint(1, 3)),
             nodes=rng.choice((8, 16, 24, 32)),

@@ -18,7 +18,7 @@
     hpc-agent metrics [--json]                        workflow timings per site (not MTTR)
     hpc-agent compare-pilot FILE.csv [--min-n 10]     baseline vs assisted localization time / MTTR
     hpc-agent import-export DIR --output DATA_ROOT [--adapter csv|raw] [--dry-run]   validate + de-identify an export
-    hpc-agent simulate (--scenarios DIR | --blind-seed N --count K) --output DIR   simulated logs, injected faults
+    hpc-agent simulate (--scenarios DIR | --blind-seed N --count K [--faults novel]) --output DIR   simulated logs
     hpc-agent evaluate --scenarios DIR [--reasoning llm]   score simulated scenarios (DIR from simulate)
 
 Decisions are recorded only; nothing is ever executed. On the CLI, --operator is an asserted
@@ -92,6 +92,9 @@ def _parser() -> argparse.ArgumentParser:
     group.add_argument("--scenarios", type=Path, help="directory of scenario YAML files (e.g. evaluation/scenarios/dev)")
     group.add_argument("--blind-seed", type=int, help="draw a blind set at random from the fault catalog")
     sim.add_argument("--count", type=int, default=20, help="blind set size")
+    sim.add_argument("--faults", choices=("known", "novel", "all"), default="known",
+                     help="blind set fault pool: known (default), novel (not encoded in the rules) or all")
+    sim.add_argument("--platform", choices=("slurm-x86", "tcs-fx1000"), default="slurm-x86", help="blind set platform")
     sim.add_argument("--output", type=Path, required=True, help="new directory outside the repository")
     explain = sub.add_parser("explain", help="ask the local LLM to explain a run's evidence")
     explain.add_argument("run_id")
@@ -179,7 +182,9 @@ def main(argv: list[str] | None = None) -> int:
             if not 1 <= args.count <= 200:
                 print("error: --count must be 1-200", file=sys.stderr)
                 return 2
-            scenarios = random_scenarios(args.blind_seed, args.count)
+            from hpc_agent.simulate.scenario import ALL_FAULTS, FAULTS, NOVEL_FAULTS
+            pool = {"known": FAULTS, "novel": NOVEL_FAULTS, "all": ALL_FAULTS}[args.faults]
+            scenarios = random_scenarios(args.blind_seed, args.count, platform=args.platform, faults=pool)
         from hpc_agent.evaluation.scenarios import write_name_map
 
         for scenario in scenarios:

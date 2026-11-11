@@ -12,7 +12,8 @@ from hpc_agent.runtime.definitions import load_definitions
 from hpc_agent.safety.secrets import find_credential_like
 from hpc_agent.simulate.catalog import hostlist
 from hpc_agent.simulate.render import generate
-from hpc_agent.simulate.scenario import DISTRACTORS, FAULTS, Scenario, load_scenarios, random_scenarios
+from hpc_agent.simulate.scenario import (ALL_FAULTS, DISTRACTORS, FAULTS, NOVEL_FAULTS, Scenario, load_scenarios,
+                                         random_scenarios)
 from tests.conftest import PROJECT_ROOT
 
 ALL = list(DISTRACTORS)
@@ -36,7 +37,7 @@ def test_same_seed_same_bytes(tmp_path):
 
 
 @pytest.mark.parametrize("platform", PLATFORMS)
-@pytest.mark.parametrize("fault", FAULTS)
+@pytest.mark.parametrize("fault", ALL_FAULTS)
 def test_every_fault_leaves_its_key_lines(tmp_path, fault, platform):
     labels = generate(scenario(fault, platform=platform), tmp_path)
     base = tmp_path / "export" / "SIM-T-001"
@@ -56,7 +57,7 @@ def test_every_fault_leaves_its_key_lines(tmp_path, fault, platform):
 
 def test_labels_use_only_known_categories(tmp_path):
     known = {c for d in load_definitions(PROJECT_ROOT).values() if d.llm for c in d.llm.categories}
-    for i, fault in enumerate(FAULTS):
+    for i, fault in enumerate(ALL_FAULTS):
         labels = generate(scenario(fault, i), tmp_path)
         assert set(labels.leading_categories) <= known and set(labels.forbidden_categories) <= known
         assert not set(labels.leading_categories) & set(labels.forbidden_categories)
@@ -64,7 +65,7 @@ def test_labels_use_only_known_categories(tmp_path):
 
 @pytest.mark.parametrize("platform", PLATFORMS)
 def test_exports_are_synthetic_only(tmp_path, platform):
-    for i, fault in enumerate(FAULTS):
+    for i, fault in enumerate(ALL_FAULTS):
         generate(scenario(fault, i, platform=platform), tmp_path)
     for name, text in files(tmp_path / "export").items():
         lines = text.splitlines()
@@ -80,12 +81,21 @@ def test_blind_set_is_reproducible_and_bounded():
     a, b = random_scenarios(7, 20), random_scenarios(7, 20)
     assert a == b and len(a) == 20 and len({s.scenario_id for s in a}) == 20
     assert random_scenarios(8, 20) != a
+    assert {s.fault for s in a} <= set(FAULTS)  # known faults by default: existing seeds keep their scenarios
+    assert {s.fault for s in random_scenarios(7, 20, faults=NOVEL_FAULTS)} <= set(NOVEL_FAULTS)
 
 
-@pytest.mark.parametrize("folder, platform", [("dev", "slurm-x86"), ("fx1000", "tcs-fx1000")])
-def test_dev_scenarios_load(folder, platform):
+def test_novel_faults_are_not_in_the_known_pool():
+    assert set(NOVEL_FAULTS).isdisjoint(FAULTS) and set(FAULTS) | set(NOVEL_FAULTS) == set(ALL_FAULTS)
+    assert FAULTS[0] == "oom_kill" and FAULTS[-1] == "logs_missing" and len(FAULTS) == 12
+
+
+@pytest.mark.parametrize("folder, platform, faults", [("dev", "slurm-x86", FAULTS), ("fx1000", "tcs-fx1000", FAULTS),
+                                                      ("novel", None, NOVEL_FAULTS)])
+def test_dev_scenarios_load(folder, platform, faults):
     dev = load_scenarios(PROJECT_ROOT / "evaluation" / "scenarios" / folder)
-    assert len(dev) >= 12 and {s.fault for s in dev} == set(FAULTS) and {s.platform for s in dev} == {platform}
+    assert len(dev) >= len(faults) and {s.fault for s in dev} == set(faults)
+    assert {s.platform for s in dev} == ({platform} if platform else {"slurm-x86", "tcs-fx1000"})
 
 
 def test_hostlist_round_trip():
@@ -141,7 +151,7 @@ def test_blind_cli_hides_fault_names(tmp_path, capsys):
 
     assert main(["simulate", "--blind-seed", "3", "--count", "2", "--output", str(tmp_path / "blind")]) == 0
     out = capsys.readouterr().out
-    assert not any(f", fault {name}" in out for name in FAULTS) and "SIM-BLIND-001" in out
+    assert not any(f", fault {name}" in out for name in ALL_FAULTS) and "SIM-BLIND-001" in out
 
 
 def test_tcs_export_parses_pjm_tofu_and_node_state(tmp_path):

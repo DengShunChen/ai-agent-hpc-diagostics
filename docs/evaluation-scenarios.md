@@ -18,6 +18,7 @@ import adapter never reads.
 |---|---|---|---|---|
 | `evaluation/scenarios/dev/` | `slurm-x86`: Slurm (slurmctld, slurmd), InfiniBand, Lustre | 14 (seeds 1001-1014) | all 12 | about 1,900-3,100 |
 | `evaluation/scenarios/fx1000/` | `tcs-fx1000`: PJM, Tofu, FEFS, FX1000 + RX2570 M6/A100 | 14 (seeds 2001-2014) | all 12 | about 1,900-3,800 |
+| `evaluation/scenarios/novel/` | both | 10 (seeds 3001-3010) | 5 novel faults, not in the rules | about 1,400-2,000 |
 
 Both sets are **development sets**: they were looked at while the simulator and the log tool were built.
 A blind set (`simulate --blind-seed`) has not been evaluated yet.
@@ -76,6 +77,35 @@ controller looks like a compute node, and the model took it for the job's node. 
 reached the report), but the model's answer was wrong for three separate reasons: search strategy,
 XID knowledge, and a misleading node name in the imported scheduler log. The last one is an import
 issue, fixed after this run (see the disclosure below).
+
+## Novel faults: rules baseline (frozen 2026-11-11, before Phases 2-4)
+
+`evaluation/scenarios/novel/` holds 10 scenarios (5 faults × 2 platforms, seeds 3001-3010) with faults that
+**were chosen because the rule-based agents do not encode them**. They test whether an agent can work out a
+cause nobody wrote a rule for. They are not a fair accuracy comparison: the rules lose here by design,
+and that is what the set is meant to show. Each label's leading category is in the matching LLM agent's
+category list, so an LLM agent *can* score; labels forbid only answers that are actually wrong (a slow
+node's job really did hit its time limit, so `scheduler.walltime` is not forbidden there).
+
+| Fault | Where the evidence is | Leading label | Rules lead with |
+|---|---|---|---|
+| `slow_node_walltime`: one node thermally throttled; the coupled job hits its time limit | logs | `node.unhealthy` | `scheduler.walltime` (both platforms) |
+| `link_degraded_mpi`: link stays up but corrupts packets; MPI aborts (no link-down) | logs + command output (`ibstat` / `tofu_links` error counters) | `network.packet_errors` | `application.exit_code`; network agent never consulted |
+| `mds_slow_hang`: metadata server stops answering; job hangs until its time limit | logs | `storage.health` or `storage.io_error` | `scheduler.walltime` |
+| `gpu_pcie_aer`: PCIe AER errors on one GPU's link; NCCL fails | logs + command output (`dcgmi` health `Warning`) | `gpu.interconnect` | `application.exit_code`; GPU agent ran but did not connect the warning |
+| `clock_skew_auth`: node lost time sync; credentials look expired and launches fail | logs | `node.unhealthy` | `application.exit_code` (a forbidden answer: 1 unsupported claim each) |
+
+**Rules: top-1 0%, top-3 0%, classification 60%, 2 unsupported claims** (10 scenarios, 8 ms each).
+
+- Misses on **logs-only** faults (6 of 10) are a design limit, not a reasoning gap: the rules never read logs.
+- Misses on the **logs + command output** faults (4 of 10) are the interesting ones: the evidence was in
+  data the rules read, but no rule connects it to the cause, or triage never routes to the agent that
+  would see it.
+- The background noise contains routine lines from the same daemons (`chronyd` "clock wrong by 0.000412
+  seconds", harmless Lustre reconnects, an old recovered link flap), so a keyword hit is not an answer.
+- These scenarios will be looked at while building Phases 2-4, so later results on them are **not** an
+  independent test. A novel blind set drawn at evaluation time (`simulate --blind-seed N --faults novel`)
+  is the independent test.
 
 ## What this shows
 

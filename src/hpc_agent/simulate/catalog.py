@@ -315,9 +315,127 @@ def logs_missing(w: World) -> dict:
                 required_missing=["get_job_status"])
 
 
+# --- novel faults: chosen because the rule-based agents do not encode them -----------------------
+# They test generalization, not accuracy. EVIDENCE says where each fault's evidence is, so results
+# can be reported per kind: a rules miss on a logs-only fault is a design limit (rules never read logs).
+
+def slow_node_walltime(w: World) -> dict:
+    """One node runs throttled from the start; the tightly coupled job crawls and hits its time limit."""
+    j = w.job
+    node = w.rng.choice(j.nodes)
+    j.start = j.end - j.timelimit
+    j.state, j.exit_code = "TIMEOUT", "0:15"
+    cpu, events = w.rng.randint(0, w.p.cpus_per_node - 1), w.rng.randint(800, 4000)
+    t = j.start + timedelta(minutes=w.rng.randint(3, 10))
+    while t < j.end:
+        w.add(t, "syslog", node, w.p.cpu_throttle(cpu, events), key=True)
+        events += w.rng.randint(300, 900)
+        t += timedelta(minutes=w.rng.randint(15, 40))
+    sched(w, j.end - timedelta(milliseconds=300), w.p.time_limit(j.job_id))
+    job_start(w)
+    job_end(w, "signal")
+    w.user_report = (f"job {j.job_id} usually finishes in about {j.timelimit.seconds // 7200} hours; this time it ran "
+                     "into the time limit with the same input")
+    return dict(classification=["scheduler", "multi-domain"], outcome="supported_hypothesis",
+                leading=["node.unhealthy"], forbidden=["application.crash", "storage.capacity"])
+
+
+def link_degraded_mpi(w: World) -> dict:
+    """A link stays up but corrupts packets; MPI gives up after transport retries. No link-down event."""
+    j, node = w.job, w.rng.choice(w.job.nodes)
+    port = w.ports[node]
+    port.symbol_errors, port.rcv_errors = w.rng.randint(20_000, 90_000), w.rng.randint(2_000, 9_000)
+    port.xmit_discards = w.rng.randint(100, 900)
+    t = j.end - timedelta(minutes=w.rng.randint(5, 15))
+    for k in range(w.rng.randint(3, 6)):
+        w.add(t + timedelta(seconds=k * w.rng.randint(30, 120)), "syslog", node, w.p.transport_retry(), key=True)
+    j.state, j.exit_code = "FAILED", "16:0"
+    job_start(w)
+    job_end(w, "exit")
+    w.user_report = (f"job {j.job_id} aborted in the middle of a run: MPI reported a communication error "
+                     f"('{launcher(w)}: error: rank 37 lost connection')")
+    return dict(classification=["network", "multi-domain"], outcome="supported_hypothesis",
+                leading=["network.packet_errors"], forbidden=["network.link_down", "storage.capacity"])
+
+
+def mds_slow_hang(w: World) -> dict:
+    """The metadata server stops answering in time; every job node waits on it until the time limit."""
+    j = w.job
+    j.start = j.end - j.timelimit
+    j.state, j.exit_code = "TIMEOUT", "0:15"
+    fs, mds = w.p.filesystem, "sim-mds-01"
+    t = j.end - timedelta(minutes=w.rng.randint(40, 90))
+    for node in j.nodes:
+        first = w.jitter(t, 0, 60)
+        w.add(first, "syslog", node,
+              f"kernel: Lustre: {w.pid()}:0:(client.c:2146:ptlrpc_expire_one_request()) @@@ Request sent has timed "
+              f"out for slow reply: o101->{fs}-MDT0000-mdc-ffff9a3c1d2e8000@{mds}{w.p.nid_suffix}:12/10 lens 576/1152 "
+              "e 0 to 1 dl 0 ref 2 fl Rpc:XQr/0/ffffffff rc 0/-1", key=node == j.nodes[0])
+        w.add(w.jitter(first, 1, 3), "syslog", node,
+              f"kernel: Lustre: {fs}-MDT0000-mdc-ffff9a3c1d2e8000: Connection to {fs}-MDT0000 (at {mds}{w.p.nid_suffix}) "
+              "was lost; in progress operations using this service will wait for recovery to complete", key=True)
+    sched(w, j.end - timedelta(milliseconds=300), w.p.time_limit(j.job_id))
+    job_start(w)
+    job_end(w, "signal")
+    w.user_report = f"job {j.job_id} stopped making progress (no new output for an hour) and was killed at the time limit"
+    return dict(classification=["storage", "multi-domain"], outcome="supported_hypothesis",
+                leading=["storage.health", "storage.io_error"], forbidden=["storage.capacity", "storage.ost_imbalance"])
+
+
+def gpu_pcie_aer(w: World) -> dict:
+    """PCIe errors on the link to one GPU, corrected at first, then one the GPU can't recover from."""
+    j, node = w.job, w.rng.choice(w.job.nodes)
+    gpu = w.rng.randrange(4)
+    pci = w.gpus[node][gpu].pci
+    port = f"0000:{int(pci[5:7], 16) - 1:02x}:00.0"
+    t = j.end - timedelta(minutes=w.rng.randint(10, 30))
+    for k in range(w.rng.randint(4, 8)):
+        when = t + timedelta(seconds=k * w.rng.randint(60, 180))
+        w.add(when, "syslog", node, f"kernel: pcieport {port}: AER: Corrected error received: {pci}.0")
+        w.add(w.jitter(when, 0.001, 0.01), "syslog", node,
+              f"kernel: nvidia {pci}.0: PCIe Bus Error: severity=Corrected, type=Data Link Layer, (Transmitter ID)",
+              key=k == 0)
+    w.add(j.end - timedelta(seconds=w.rng.randint(3, 10)), "syslog", node,
+          f"kernel: pcieport {port}: AER: Uncorrected (Non-Fatal) error received: {pci}.0", key=True)
+    w.gpus[node][gpu].health = "Warning"
+    w.gpus[node][gpu].message = "PCIe replay rate above threshold"
+    j.state, j.exit_code = "FAILED", "1:0"
+    job_start(w)
+    job_end(w, "exit")
+    w.user_report = f"training job {j.job_id} failed: 'NCCL error: unhandled system error'"
+    return dict(classification=["gpu", "multi-domain"], outcome="supported_hypothesis",
+                leading=["gpu.interconnect"], forbidden=["gpu.application"])
+
+
+def clock_skew_auth(w: World) -> dict:
+    """A node lost time sync; its clock drifts until job credentials look expired and launches fail."""
+    j, node = w.job, w.rng.choice(w.job.nodes)
+    j.start = j.end - timedelta(seconds=w.rng.randint(5, 30))  # anchored at the end, which is inside the window
+    j.state, j.exit_code = "FAILED", "1:0"
+    t = j.start - timedelta(hours=w.rng.randint(1, 2))
+    w.add(t, "syslog", node, f"chronyd[{w.pid()}]: Can't synchronise: no selectable sources", key=True)
+    w.add(j.start - timedelta(minutes=w.rng.randint(5, 30)), "syslog", node,
+          f"chronyd[{w.pid()}]: System clock wrong by {w.rng.randint(320, 900)}.{w.rng.randint(0, 999):03d} seconds",
+          key=True)
+    if w.p.name != "tcs-fx1000":
+        w.add(w.jitter(j.start, 1, 3), "syslog", node,
+              f"munged[{w.pid()}]: Unauthorized credential for client UID={j.uid} GID={j.uid}: Expired credential")
+    sched(w, w.jitter(j.start, 2, 4), w.p.auth_error(node, j.job_id), key=True)
+    job_start(w)
+    job_end(w, "exit")
+    w.user_report = f"job {j.job_id} fails within seconds of starting, every time it lands on the same node"
+    return dict(classification=["scheduler", "multi-domain"], outcome="supported_hypothesis",
+                leading=["node.unhealthy"], forbidden=["application.crash", "application.exit_code"])
+
+
+EVIDENCE = {"slow_node_walltime": "logs", "link_degraded_mpi": "logs + command output", "mds_slow_hang": "logs",
+            "gpu_pcie_aer": "logs + command output", "clock_skew_auth": "logs"}
+
 FAULT_FUNCTIONS: dict[str, Callable[[World], dict]] = {
     "oom_kill": oom_kill, "segfault": segfault, "walltime": walltime, "admin_cancel": admin_cancel,
     "memory_ecc_node_down": memory_ecc_node_down, "gpu_xid79": gpu_xid79, "gpu_xid48": gpu_xid48,
     "gpu_xid13_app": gpu_xid13_app, "ib_flap_lustre": ib_flap_lustre, "ost_full": ost_full,
     "ost_imbalance": ost_imbalance, "logs_missing": logs_missing,
+    "slow_node_walltime": slow_node_walltime, "link_degraded_mpi": link_degraded_mpi, "mds_slow_hang": mds_slow_hang,
+    "gpu_pcie_aer": gpu_pcie_aer, "clock_skew_auth": clock_skew_auth,
 }

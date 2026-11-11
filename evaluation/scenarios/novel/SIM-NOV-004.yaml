@@ -1,0 +1,8 @@
+# Novel-fault development scenario (Slurm): a fault the rule-based agents do not encode. Used while
+# building Phases 2-4, so it is not an independent test; a novel blind set (simulate --faults novel) is.
+scenario_id: SIM-NOV-004
+seed: 3004
+platform: slurm-x86
+fault: gpu_pcie_aer
+distractors: [other_node_xid13, old_correctable_ecc]
+description: "PCIe errors on one GPU's link; NCCL fails."

@@ -1,0 +1,8 @@
+# Novel-fault development scenario (Fujitsu TCS-style; approximated PJM/Tofu/FEFS formats): a fault the rule-based agents do not encode. Used while
+# building Phases 2-4, so it is not an independent test; a novel blind set (simulate --faults novel) is.
+scenario_id: SIM-NOV-008
+seed: 3008
+platform: tcs-fx1000
+fault: mds_slow_hang
+distractors: [lustre_reconnects, other_job_oom]
+description: "Metadata server stops answering in time; the job hangs."
