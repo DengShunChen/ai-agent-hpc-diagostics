@@ -23,6 +23,7 @@ from hpc_agent.ingest.deidentify import Pseudonymizer
 from hpc_agent.ingest.importer import import_export
 from hpc_agent.ingest.raw_export import RawExportAdapter
 from hpc_agent.llm.provider import ChatLLM
+from hpc_agent.simulate.catalog import EVIDENCE
 from hpc_agent.simulate.scenario import Labels
 from hpc_agent.tools.gateway import build_default_gateway
 from hpc_agent.workflows.diagnostic_workflow import run_diagnosis
@@ -41,6 +42,9 @@ class LogResult(BaseModel):
     key_lines: int
     key_lines_cited: int
     log_searches: int
+    log_analyses: int = 0  # analyze_logs calls
+    consults: int = 0  # agents that ran because another agent consulted them
+    evidence: str = ""  # where a novel fault's evidence is (simulate/catalog.py EVIDENCE); "" for known faults
 
 
 def _cited(run, pseudonymizer: Pseudonymizer) -> set[tuple[str, str, int]]:
@@ -96,7 +100,10 @@ def evaluate_scenarios(
             found = len(wanted & cited)
             logs.append(LogResult(case_id=scenario_id, fault=label.fault, total_lines=label.total_lines,
                                   key_lines=len(wanted), key_lines_cited=found,
-                                  log_searches=sum(t.tool == "get_log_lines" for t in run.tools_invoked)))
+                                  log_searches=sum(t.tool == "get_log_lines" for t in run.tools_invoked),
+                                  log_analyses=sum(t.tool == "analyze_logs" for t in run.tools_invoked),
+                                  consults=sum(d.consulted_by is not None for d in run.diagnoses),
+                                  evidence=EVIDENCE.get(label.fault, "")))
     return results, summarize(results), logs
 
 
@@ -120,13 +127,22 @@ def write_name_map(directory: Path, scenario_id: str) -> Path:
     return path
 
 
-def render_log_section(logs: list[LogResult]) -> str:
+def render_log_section(logs: list[LogResult], results: list | None = None) -> str:
     keyed = [r for r in logs if r.key_lines]
     cited = sum(r.key_lines_cited > 0 for r in keyed)
     lines = ["## Log evidence (simulated scenarios)", "",
              f"Scenarios where an agent cited at least one injected key log line: **{cited} of {len(keyed)}**. "
              "Rule-based agents never search logs (by design in this version), so in a rules run this is 0.", "",
-             "| Scenario | Fault | Log lines | Key lines | Key lines cited | Log searches |", "|---|---|---|---|---|---|"]
-    lines += [f"| {r.case_id} | {r.fault} | {r.total_lines} | {r.key_lines} | {r.key_lines_cited} | {r.log_searches} |"
-              for r in logs]
+             "| Scenario | Fault | Log lines | Key lines | Key lines cited | Log searches | Log analyses | Consulted agents |",
+             "|---|---|---|---|---|---|---|---|"]
+    lines += [f"| {r.case_id} | {r.fault} | {r.total_lines} | {r.key_lines} | {r.key_lines_cited} | {r.log_searches} "
+              f"| {r.log_analyses} | {r.consults} |" for r in logs]
+    kinds = sorted({r.evidence for r in logs if r.evidence})
+    if kinds and results:
+        top1 = {r.case_id: r.leading_correct for r in results}
+        lines += ["", "Novel faults by where their evidence is (a rules miss on a logs-only fault is a design limit):", "",
+                  "| Evidence | Scenarios | Top-1 correct |", "|---|---|---|"]
+        for kind in kinds:
+            ids = [r.case_id for r in logs if r.evidence == kind]
+            lines.append(f"| {kind} | {len(ids)} | {sum(bool(top1.get(i)) for i in ids)} |")
     return "\n".join(lines) + "\n"

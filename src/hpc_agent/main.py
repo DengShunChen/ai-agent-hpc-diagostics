@@ -236,7 +236,7 @@ def main(argv: list[str] | None = None) -> int:
                 from hpc_agent.runtime.skills import SkillLibrary
 
                 summary = summary.model_copy(update={"skills_version": SkillLibrary.load(adapter.root).version()})
-            log_section = "\n" + render_log_section(logs)
+            log_section = "\n" + render_log_section(logs, results)
         else:
             results, summary = run_evaluation(args.cases or adapter.root / "evaluation" / "cases",
                                               approvals_log=args.approvals_log, llm=llm)
