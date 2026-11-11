@@ -196,7 +196,8 @@ def generate(sc: Scenario, out: Path) -> Labels:
                 "alerts": w.alerts, "operator_notes": []}
     _write(base / "incident.json", [json.dumps(incident, indent=2)])
 
-    labels = Labels(scenario_id=sc.scenario_id, fault=sc.fault, classification=spec["classification"],
+    labels = Labels(scenario_id=sc.scenario_id, fault=sc.fault, platform=sc.platform,
+                    classification=spec["classification"],
                     outcome=spec["outcome"], leading_categories=spec["leading"],
                     forbidden_categories=spec["forbidden"], required_missing=spec.get("required_missing", []),
                     key_lines=key_lines, total_lines=total, components=spec.get("components", []))

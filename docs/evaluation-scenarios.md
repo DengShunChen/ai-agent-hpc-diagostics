@@ -25,24 +25,28 @@ A blind set (`simulate --blind-seed`) has not been evaluated yet.
 
 ## Results
 
-| Metric | Rules, Slurm set | qwen2.5:7b, Slurm set | Rules, FX1000 set |
-|---|---|---|---|
-| Correct domain classification | 86% | 43% | 86% |
-| Root cause accuracy, top-1 | 77% | 31% | 77% |
-| Root cause accuracy, top-3 | 77% | 38% | 85% |
-| Outcome matches label | 93% | 86% | 100% |
-| Correct refusal to conclude | 100% | 0% | 100% |
-| Open hypotheses backed by tool evidence | 100% | 86% | 100% |
-| Unsupported claim rate | 0% | 0% | 0% |
-| Scenarios with an injected key log line cited | 0 of 13 (rules never search logs) | **0 of 13** | 0 of 12 (rules never search logs) |
-| Log searches per scenario (7B) | – | 2-5 | – |
-| Mean time per scenario | 8 ms | 330 s | 9 ms |
-| Model proposals discarded by the checks | – | 19 | – |
+| Metric | Rules, Slurm set | qwen2.5:7b, Slurm set, first run | qwen2.5:7b, Slurm set, after the import fix | Rules, FX1000 set |
+|---|---|---|---|---|
+| Correct domain classification | 86% | 43% | 43% | 86% |
+| Root-cause category, top-1 | 77% (10/13) | 31% (4/13) | 46% (6/13) | 77% |
+| Root-cause category, top-3 | 77% | 38% | 46% | 85% |
+| Outcome matches label | 93% | 86% | 93% | 100% |
+| Correct refusal to conclude | 100% (1/1) | 0% (0/1) | 0% (0/1) | 100% |
+| Open hypotheses backed by tool evidence | 100% | 86% | 92% | 100% |
+| Unsupported claim rate | 0% | 0% | 4% (1 claim) | 0% |
+| Scenarios with an injected key log line cited | 0 of 13 (rules never search logs) | 0 of 13 | **2 of 13** | 0 of 12 (rules never search logs) |
+| Mean time per scenario | 8 ms | 330 s | 335 s | 9 ms |
+| Model proposals discarded by the checks | – | 19 | 20 | – |
 
-Top-1 and top-3 are over the 13 scenarios labelled with a supported root cause; the `logs_missing`
-scenario counts toward the refusal metric instead. The 7B run used Ollama on an 8-core CPU
-with no GPU, deterministic decoding, `HPC_AGENT_LLM_TIMEOUT=900`. The 7B model was not run on the FX1000
-set, and Claude was not run on either set.
+"After the import fix" ran on commit 096f6ce (job-manager log lines no longer carry a pseudonymized node,
+and the evaluator counts cited scheduler-log key lines). Both cited key lines were in the scheduler log
+(SIM-DEV-003 walltime, SIM-DEV-004 administrator cancel), which the first run's import made unusable and
+its scoring could not count, so the change mixes the import fix, the counting fix and run-to-run variation
+(decoding is deterministic, but tool results and prompts changed). The model still misses all three GPU
+hardware faults, both cascades and the storage capacity faults. Top-1 and top-3 count the root-cause
+**category**, not the mechanism. The 7B run used Ollama (`qwen2.5:7b`, digest 845dbda0ea48, Q4_K_M) on an
+8-core CPU with no GPU, temperature 0, seed 42, `HPC_AGENT_LLM_TIMEOUT=900`. The 7B model was not run on
+the FX1000 set, and Claude was not run on either set.
 
 ### Where the rules miss
 
@@ -159,8 +163,15 @@ node's job really did hit its time limit, so `scheduler.walltime` is not forbidd
   daemon name is no longer pseudonymized or replaced in log text. The same look found that the
   evaluator could never count a cited scheduler-log key line (labels name the controller host, the
   index named the daemon); it now matches those lines by source and line number. Rules results on both
-  sets are unchanged (rules don't read logs). **The 7B numbers above were measured before this fix**
-  and have not been rerun.
+  sets are unchanged (rules don't read logs). The 7B dev set was rerun after it (see Results).
+- **Phases 2-4 prompt and limits (2026-11-11, after the novel-fault rules baseline was frozen):** the four
+  specialists may call `analyze_logs` and propose a `consult`, their prompt asks them to form a hypothesis,
+  test it and revise it, and to compare counts, nodes and timing before trusting a keyword hit; limits rose
+  to `max_rounds` 8 and `max_tool_calls` 12. The text names no fault from any scenario set. All LLM results
+  above were measured before this change.
+- **Evaluation code (2026-11-11, from the independent evaluator's review):** failed cases are kept with
+  outcome "failed"; labels gained `platform` and `components` (exports unchanged); reports add the faulty
+  component check, counts by group and platform, and model completion apart from rules fallback.
 - Results on the dev sets after these changes are not an independent test of them. A blind set from the
   same catalog tests unseen instances only; independently designed cases are the stronger test
   ([evaluation-protocol.md](evaluation-protocol.md)).
@@ -178,7 +189,7 @@ The output directory must be outside the repository and new or empty.
 
 ## Next steps
 
-1. Rerun qwen2.5:7b on the dev set with the job-manager log fix (about 80 minutes on this host).
+1. Formal evaluation under [evaluation-protocol.md](evaluation-protocol.md), run by the independent evaluator.
 2. Calibrate the TCS formats against a few de-identified real PJM, Tofu and FEFS lines.
 3. Evaluate a blind set once, with the seed kept by someone other than the developer.
 4. Run the human drill (`evaluation/drill/README.md`) to measure time and correctness with and without

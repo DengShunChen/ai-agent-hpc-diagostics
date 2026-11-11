@@ -33,7 +33,6 @@ identity; the HTTP API instead derives the operator from an authenticated bearer
 from __future__ import annotations
 
 import argparse
-from datetime import UTC, datetime
 import json
 import os
 import sys
@@ -253,7 +252,12 @@ def main(argv: list[str] | None = None) -> int:
             from hpc_agent.evaluation.scenarios import manifest
 
             run_manifest = manifest(args.scenarios, llm)
-            results, summary, logs = evaluate_scenarios(args.scenarios, llm=llm, runs_dir=args.runs_dir)
+            try:
+                results, summary, logs = evaluate_scenarios(args.scenarios, llm=llm, runs_dir=args.runs_dir,
+                                                            run_manifest=run_manifest)
+            except ValueError as error:  # an invalid batch or a non-empty runs directory
+                print(f"error: {error}", file=sys.stderr)
+                return 2
             if llm is not None:
                 from hpc_agent.runtime.skills import SkillLibrary
 
@@ -271,11 +275,8 @@ def main(argv: list[str] | None = None) -> int:
                                              "cases": [r.model_dump() for r in results],
                                              "logs": [r.model_dump() for r in logs] if args.scenarios else []},
                                             indent=2))
-        if args.scenarios and args.runs_dir:
-            usage = getattr(llm, "usage", None) if getattr(llm, "name", None) == "anthropic" else None
-            run_manifest |= {"finished_at": datetime.now(UTC).isoformat(), "cases": len(results),
-                             "failed": sum(bool(r.error) for r in logs), "claude_usage": usage}
-            (args.runs_dir / "manifest.json").write_text(json.dumps(run_manifest, indent=2), encoding="utf-8")
+        if args.scenarios and args.runs_dir and getattr(llm, "name", None) == "anthropic":
+            (args.runs_dir / "claude_usage.json").write_text(json.dumps(llm.usage, indent=2), encoding="utf-8")
         print(report)
         return 0
 

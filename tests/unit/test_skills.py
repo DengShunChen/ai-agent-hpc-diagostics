@@ -84,7 +84,7 @@ def test_skills_are_not_listed_as_data_tools(adapter, gateway, scopes):
     llm = FakeLLM({"scheduler": [answer(hypotheses=[])]})
     d = LLMSpecialist(SchedulerAgent(), Domain.SCHEDULER, llm).diagnose(
         adapter.load_incident("POC-SCHEDULER-001"), ScopedGateway(gateway, "scheduler-agent", scopes, []))
-    assert "Start by calling your data tools (get_job_status, get_log_lines, get_node_status)" in llm.seen[0][2][0]["content"]
+    assert "Start by calling your data tools (analyze_logs, get_job_status, get_log_lines, get_node_status)" in llm.seen[0][2][0]["content"]
     assert not any("load_skill" in m for m in d.missing_information)
 
 

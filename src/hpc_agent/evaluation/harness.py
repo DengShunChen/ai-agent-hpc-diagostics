@@ -66,7 +66,7 @@ class CaseResult(BaseModel):
     classification: str
     classification_correct: bool
     expected_outcome: Outcome
-    outcome: Outcome
+    outcome: Outcome | Literal["failed"]  # "failed": the case did not finish (never a made-up diagnosis outcome)
     outcome_correct: bool
     leading_category: str | None
     leading_cause: str | None

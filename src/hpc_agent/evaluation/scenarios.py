@@ -57,8 +57,12 @@ class LogResult(BaseModel):
     consults: int = 0  # agents that ran because another agent consulted them
     evidence: str = ""  # where a novel fault's evidence is (simulate/catalog.py EVIDENCE); "" for known faults
     error: str = ""  # why the case failed (it is then scored as wrong); "" when it ran
-    # Does the leading hypothesis name the labelled faulty component? None when the label names none.
+    # Does the leading hypothesis name any labelled faulty component? None when the label names none.
     component_hit: bool | None = None
+    platform: str = ""
+    group: str = ""  # known | novel | missing-data
+    # LLM runs: True when triage and every specialist ran on the model (no rules fallback). None for rules runs.
+    model_complete: bool | None = None
     fallbacks: list[str] = []  # agents that fell back to rules, with the reason
 
 
@@ -77,19 +81,23 @@ def _cited(run, pseudonymizer: Pseudonymizer) -> set[tuple[str, str, int]]:
     return out
 
 
-def _failed(case: Case, error: Exception) -> CaseResult:
-    """A case that did not finish counts as wrong on every metric (it is never left out)."""
+def _failed(case: Case, reason: str, seconds: float) -> CaseResult:
+    """A case that did not finish: outcome "failed", wrong on every case-level metric, real time kept.
+    Metrics computed over output hypotheses (evidence quality) have no hypotheses to count for it."""
     exp = case.expected
-    wrong = "no_supported_hypothesis" if exp.outcome != "no_supported_hypothesis" else "supported_hypothesis"
-    return CaseResult(case_id=case.case_id, description=f"{case.description}; FAILED: {type(error).__name__}",
+    return CaseResult(case_id=case.case_id, description=f"{case.description}; FAILED: {reason[:80]}",
                       label_source=case.label_source, classification="error", classification_correct=False,
-                      expected_outcome=exp.outcome, outcome=wrong, outcome_correct=False, leading_category=None,
+                      expected_outcome=exp.outcome, outcome="failed", outcome_correct=False, leading_category=None,
                       leading_cause=None, leading_confidence=0.0,
                       leading_correct=False if exp.leading_categories else None,
                       top3_correct=False if exp.leading_categories else None, open_hypotheses=0,
                       tool_backed_hypotheses=0, unsupported_claims=[], missing_required=len(exp.required_missing),
                       missing_found=0, facts_reported=0, facts_tool=0, references=0, proposed_actions=0,
-                      duration_ms=0.0)
+                      duration_ms=seconds * 1000)
+
+
+class BatchInvalid(ValueError):
+    """The scenario directory itself is broken (not a failure of the system under test)."""
 
 
 def _digest(paths: list[Path], root: Path) -> str:
@@ -139,68 +147,108 @@ def manifest(directory: Path, llm: ChatLLM | None) -> dict:
     }
 
 
+def group_of(fault: str) -> str:
+    return "missing-data" if fault == "logs_missing" else "novel" if fault in EVIDENCE else "known"
+
+
 def evaluate_scenarios(
     directory: Path, scopes: Mapping[str, frozenset[str]] | None = None, llm: ChatLLM | None = None,
-    runs_dir: Path | None = None,
+    runs_dir: Path | None = None, run_manifest: dict | None = None,
 ) -> tuple[list[CaseResult], Summary, list[LogResult]]:
+    """Every labelled scenario is a planned case; each one ends as a scored run or a recorded failure.
+
+    With runs_dir (which must be new or empty): manifest.json is written before the first case
+    (status "running") and finished as "complete" or "interrupted"; progress.jsonl gets one line per
+    case as it finishes, so an interrupted batch still shows what ran."""
     labels = {p.stem: Labels.model_validate_json(p.read_text(encoding="utf-8"))
               for p in sorted((directory / "labels").glob("*.json"))}
+    exports = {p.name for p in (directory / "export").iterdir() if p.is_dir()} if (directory / "export").is_dir() else set()
+    if not labels or set(labels) != exports:
+        raise BatchInvalid(f"evaluation batch invalid: labels and exports must match one to one "
+                           f"(labels only: {sorted(set(labels) - exports)}, exports only: {sorted(exports - set(labels))})")
+    if runs_dir is not None:
+        if runs_dir.exists() and any(runs_dir.iterdir()):
+            raise ValueError(f"runs directory must be new or empty: {runs_dir}")
+        runs_dir.mkdir(parents=True, exist_ok=True)
+    state = {**(run_manifest or {}), "status": "running", "planned_cases": sorted(labels)}
+    _write_manifest(runs_dir, state)
     results, logs = [], []
-    with tempfile.TemporaryDirectory(prefix="hpc-agent-scenarios-") as tmp:
-        root = Path(tmp) / "root"
-        shutil.copytree(default_data_root() / "knowledge", root / "knowledge")
-        (root / "fixtures").mkdir(parents=True)
-        (root / "fixtures" / "DATA_CLASS.json").write_text(json.dumps({"class": "synthetic"}))
-        pseudonymizer = Pseudonymizer(SIMULATION_KEY)
-        report = import_export(RawExportAdapter(directory / "export"), root, pseudonymizer)
-        if report.rejected:
-            raise ValueError(f"scenario import rejected: {report.rejected}")
-        adapter = ReadOnlyDataAdapter(root)
-        if getattr(llm, "name", None) == "anthropic":
-            from hpc_agent.llm.claude import cloud_data_problem
+    try:
+        with tempfile.TemporaryDirectory(prefix="hpc-agent-scenarios-") as tmp:
+            root = Path(tmp) / "root"
+            shutil.copytree(default_data_root() / "knowledge", root / "knowledge")
+            (root / "fixtures").mkdir(parents=True)
+            (root / "fixtures" / "DATA_CLASS.json").write_text(json.dumps({"class": "synthetic"}))
+            pseudonymizer = Pseudonymizer(SIMULATION_KEY)
+            report = import_export(RawExportAdapter(directory / "export"), root, pseudonymizer)
+            adapter = ReadOnlyDataAdapter(root)
+            if getattr(llm, "name", None) == "anthropic":
+                from hpc_agent.llm.claude import cloud_data_problem
 
-            problem = cloud_data_problem(adapter.data_class())
-            if problem:
-                raise PermissionError(problem)
-        for scenario_id in report.imported:
-            label = labels[scenario_id]
-            case = Case(case_id=scenario_id, description=f"simulated fault: {label.fault}",
-                        label_source=label.label_source,
-                        expected=Expectation(classification=label.classification, outcome=label.outcome,
-                                             leading_categories=label.leading_categories,
-                                             forbidden_categories=label.forbidden_categories,
-                                             required_missing=label.required_missing))
-            trace = TraceRecorder()
-            started = time.monotonic()
-            try:
-                run = run_diagnosis(adapter.load_incident(scenario_id), build_default_gateway(adapter), scopes, llm=llm,
-                                    trace=trace)
-            except Exception as error:  # noqa: BLE001 - a failed case is recorded and scored as wrong
-                results.append(_failed(case, error))
-                logs.append(LogResult(case_id=scenario_id, fault=label.fault, total_lines=label.total_lines,
-                                      key_lines=len(label.key_lines), key_lines_cited=0, log_searches=0,
-                                      evidence=EVIDENCE.get(label.fault, ""),
-                                      error=f"{type(error).__name__}: {str(error)[:200]}"))
-                _keep(runs_dir, scenario_id, None, trace, time.monotonic() - started, logs[-1].error)
-                continue
-            _keep(runs_dir, scenario_id, run, trace, time.monotonic() - started, "")
-            results.append(score(case, run))
-            lead = next((c for c in run.rca.probable_causes if c.status.value == "hypothesis"), None)
-            faulty = {_pseudonymize_component(c, pseudonymizer) for c in label.components}
-            component_hit = (bool(lead) and bool(faulty & set(lead.components))) if faulty else None
-            cited = _cited(run, pseudonymizer)
-            wanted = {(source, None if source in SCHEDULER_LOGS else pseudonymizer.pseudonym("node", node), int(line))
-                      for source, node, line in (key.split(":") for key in label.key_lines)}
-            found = len(wanted & cited)
-            logs.append(LogResult(case_id=scenario_id, fault=label.fault, total_lines=label.total_lines,
-                                  key_lines=len(wanted), key_lines_cited=found,
-                                  log_searches=sum(t.tool == "get_log_lines" for t in run.tools_invoked),
-                                  log_analyses=sum(t.tool == "analyze_logs" for t in run.tools_invoked),
-                                  consults=sum(d.consulted_by is not None for d in run.diagnoses),
-                                  evidence=EVIDENCE.get(label.fault, ""), component_hit=component_hit,
-                                  fallbacks=[f"{d.agent}: {d.reasoning_note}" for d in run.diagnoses
-                                             if d.reasoning == "rules-fallback"]))
+                problem = cloud_data_problem(adapter.data_class())
+                if problem:
+                    raise PermissionError(problem)
+            for scenario_id in sorted(labels):
+                label = labels[scenario_id]
+                case = Case(case_id=scenario_id, description=f"simulated fault: {label.fault}",
+                            label_source=label.label_source,
+                            expected=Expectation(classification=label.classification, outcome=label.outcome,
+                                                 leading_categories=label.leading_categories,
+                                                 forbidden_categories=label.forbidden_categories,
+                                                 required_missing=label.required_missing))
+                base = dict(case_id=scenario_id, fault=label.fault, total_lines=label.total_lines,
+                            key_lines=len(label.key_lines), evidence=EVIDENCE.get(label.fault, ""),
+                            platform=label.platform, group=group_of(label.fault),
+                            component_hit=False if label.components else None)
+                trace, started = TraceRecorder(), time.monotonic()
+                if scenario_id in report.rejected:
+                    error = f"import rejected: {report.rejected[scenario_id]}"
+                    results.append(_failed(case, error, 0.0))
+                    logs.append(LogResult(**base, key_lines_cited=0, log_searches=0, error=error))
+                    _keep(runs_dir, scenario_id, None, trace, 0.0, error, llm)
+                    continue
+                try:
+                    run = run_diagnosis(adapter.load_incident(scenario_id), build_default_gateway(adapter), scopes,
+                                        llm=llm, trace=trace)
+                except Exception as error:  # noqa: BLE001 - a failed case is recorded, never dropped
+                    seconds = time.monotonic() - started
+                    reason = f"{type(error).__name__}: {str(error)[:200]}"
+                    results.append(_failed(case, reason, seconds))
+                    logs.append(LogResult(**base, key_lines_cited=0, log_searches=0, error=reason))
+                    _keep(runs_dir, scenario_id, None, trace, seconds, reason, llm)
+                    continue
+                _keep(runs_dir, scenario_id, run, trace, time.monotonic() - started, "", llm)
+                results.append(score(case, run))
+                lead = next((c for c in run.rca.probable_causes if c.status.value == "hypothesis"), None)
+                faulty = {_pseudonymize_component(c, pseudonymizer) for c in label.components}
+                cited = _cited(run, pseudonymizer)
+                wanted = {(source, None if source in SCHEDULER_LOGS else pseudonymizer.pseudonym("node", node), int(line))
+                          for source, node, line in (key.split(":") for key in label.key_lines)}
+                fallbacks = ([f"triage-agent: {run.triage.reasoning_note}"] if run.triage.reasoning == "rules-fallback"
+                             else []) + [f"{d.agent}: {d.reasoning_note}" for d in run.diagnoses
+                                         if d.reasoning == "rules-fallback"]
+                logs.append(LogResult(**{**base, "component_hit": (bool(lead) and bool(faulty & set(lead.components)))
+                                         if faulty else None},
+                                      key_lines_cited=len(wanted & cited),
+                                      log_searches=sum(t.tool == "get_log_lines" for t in run.tools_invoked),
+                                      log_analyses=sum(t.tool == "analyze_logs" for t in run.tools_invoked),
+                                      consults=sum(d.consulted_by is not None for d in run.diagnoses),
+                                      fallbacks=fallbacks,
+                                      model_complete=None if llm is None else not fallbacks))
+    except BaseException:
+        state["status"] = "interrupted"
+        _write_manifest(runs_dir, {**state, "finished_cases": len(results)})
+        raise
+    state["status"] = "complete"
+    _write_manifest(runs_dir, {**state, "finished_cases": len(results),
+                               "failed_cases": sum(bool(r.error) for r in logs)})
     return results, summarize(results), logs
+
+
+def _write_manifest(runs_dir: Path | None, state: dict) -> None:
+    if runs_dir is not None:
+        state = {**state, "updated_at": datetime.now(UTC).isoformat()}
+        (runs_dir / "manifest.json").write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")
 
 
 def _pseudonymize_component(component: str, pseudonymizer: Pseudonymizer) -> str:
@@ -208,17 +256,25 @@ def _pseudonymize_component(component: str, pseudonymizer: Pseudonymizer) -> str
     return f"node:{pseudonymizer.pseudonym('node', name)}" if kind == "node" else component
 
 
-def _keep(runs_dir: Path | None, scenario_id: str, run, trace: TraceRecorder, seconds: float, error: str) -> None:
-    """<runs_dir>/<id>.run.json (the DiagnosticRun, or the error) and <id>.trace.jsonl (the agent trace)."""
+def _keep(runs_dir: Path | None, scenario_id: str, run, trace: TraceRecorder, seconds: float, error: str,
+          llm: ChatLLM | None = None) -> None:
+    """<id>.run.json (the DiagnosticRun, or the error), <id>.trace.jsonl, and a line in progress.jsonl."""
     if runs_dir is None:
         return
-    runs_dir.mkdir(parents=True, exist_ok=True)
+    record_path = runs_dir / f"{scenario_id}.run.json"
+    if record_path.exists():
+        raise FileExistsError(f"refusing to overwrite {record_path}")
     record = {"scenario_id": scenario_id, "wall_seconds": round(seconds, 3), "error": error,
               "run": run.model_dump(mode="json") if run is not None else None}
-    (runs_dir / f"{scenario_id}.run.json").write_text(json.dumps(record, indent=1), encoding="utf-8")
-    with (runs_dir / f"{scenario_id}.trace.jsonl").open("w", encoding="utf-8") as handle:
+    record_path.write_text(json.dumps(record, indent=1), encoding="utf-8")
+    with (runs_dir / f"{scenario_id}.trace.jsonl").open("x", encoding="utf-8") as handle:
         for event in trace.events:
             handle.write(json.dumps(event, ensure_ascii=False, default=str) + "\n")
+    usage = dict(getattr(llm, "usage", {}) or {}) if getattr(llm, "name", None) == "anthropic" else None
+    with (runs_dir / "progress.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"scenario_id": scenario_id, "status": "failed" if error else "completed",
+                                 "wall_seconds": round(seconds, 3), "claude_usage": usage,
+                                 "at": datetime.now(UTC).isoformat()}) + "\n")
 
 
 def write_name_map(directory: Path, scenario_id: str) -> Path:
@@ -260,7 +316,40 @@ def render_log_section(logs: list[LogResult], results: list | None = None) -> st
               f"whether the leading hypothesis names the labelled node or OST: **{sum(r.component_hit for r in scored)} "
               f"of {len(scored)}** scenarios that have one. Mechanism, timing and evidence relevance need a blinded "
               "human review with a fixed rubric. "
-              f"Failed cases (scored as wrong, not dropped): **{len(failed)} of {len(logs)}**."]
+              f"Failed cases (outcome \"failed\", counted in every case-level denominator, never dropped): "
+              f"**{len(failed)} of {len(logs)}**. Metrics over output hypotheses (evidence quality) have no "
+              "hypotheses from a failed case."]
+    if results:
+        by_id = {r.case_id: r for r in results}
+
+        def count(rows, test) -> str:
+            scored = [x for x in (test(r) for r in rows) if x is not None]
+            return f"{sum(scored)}/{len(scored)}" if scored else "–"
+
+        lines += ["", "### Counts by group and platform", "",
+                  "Numerator/denominator. Category = the root-cause category matched (not the mechanism); component ="
+                  " the leading hypothesis names any labelled faulty component (infrastructure faults only; the "
+                  "metadata-server fault has no component label). Failed cases are in every denominator.", "",
+                  "| Group | Platform | Cases | Category top-1 | Category top-3 | Component | Outcome | Failed "
+                  "| Model completed (no rules fallback) |", "|---|---|---|---|---|---|---|---|---|"]
+        for group in ("known", "novel", "missing-data"):
+            for platform in sorted({r.platform for r in logs}):
+                rows = [r for r in logs if r.group == group and r.platform == platform]
+                if not rows:
+                    continue
+                lines.append(f"| {group} | {platform or '?'} | {len(rows)} "
+                             f"| {count(rows, lambda r: by_id[r.case_id].leading_correct)} "
+                             f"| {count(rows, lambda r: by_id[r.case_id].top3_correct)} "
+                             f"| {count(rows, lambda r: r.component_hit)} "
+                             f"| {count(rows, lambda r: by_id[r.case_id].outcome_correct)} "
+                             f"| {sum(bool(r.error) for r in rows)} "
+                             f"| {count(rows, lambda r: r.model_complete)} |")
+        llm_rows = [r for r in logs if r.model_complete is not None]
+        if llm_rows:
+            clean = [r for r in llm_rows if r.model_complete]
+            lines += ["", f"Model completion: **{len(clean)} of {len(llm_rows)}** cases ran with no agent falling back to "
+                      f"rules. On those cases only, category top-1: **{count(clean, lambda r: by_id[r.case_id].leading_correct)}**. "
+                      "The rows above include fallback cases (the whole system as deployed)."]
     kinds = sorted({r.evidence for r in logs if r.evidence})
     if kinds and results:
         top1 = {r.case_id: r.leading_correct for r in results}

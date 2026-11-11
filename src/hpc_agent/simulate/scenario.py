@@ -67,6 +67,7 @@ class Labels(BaseModel):
 
     scenario_id: str
     fault: str
+    platform: str = ""
     label_source: str = LABEL_SOURCE
     classification: list[str]
     outcome: Literal["supported_hypothesis", "insufficient_evidence", "no_supported_hypothesis"]
