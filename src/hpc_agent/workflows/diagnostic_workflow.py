@@ -3,6 +3,9 @@
     Incident -> Triage Agent -> selected specialist agents -> RCA Coordinator
              -> Remediation Agent -> DiagnosticRun
     (Triage also sends to the coordinator, which then knows how many diagnoses to expect.)
+    A specialist may ask another domain's agent to look (a consult, carrying only checked tool
+    evidence). The coordinator sends it only to an agent that has not run in this run, at most
+    MAX_CONSULTS per run, and waits for that diagnosis too. Consulted agents keep their own scope.
 
 The framework only routes messages; agents stay plain Python. Any exception in an agent
 (including a denied tool call) propagates out of the run: the workflow fails closed.
@@ -29,6 +32,7 @@ from hpc_agent.llm.provider import ChatLLM
 from hpc_agent.runtime.trace import TraceRecorder, no_trace
 from hpc_agent.models import (
     AgentDiagnosis,
+    ConsultRequest,
     DiagnosticRun,
     EvidenceKind,
     HypothesisStatus,
@@ -54,6 +58,15 @@ class Specialist(Protocol):
 class TriagedIncident:
     incident: Incident
     triage: TriageResult
+
+
+@dataclass(frozen=True)
+class Consulted:
+    incident: Incident
+    request: ConsultRequest
+
+
+MAX_CONSULTS = 3  # per run; each agent still runs at most once
 
 
 @dataclass(frozen=True)
@@ -92,32 +105,55 @@ class SpecialistExecutor(Executor):
         await ctx.yield_output(diagnosis)
         await ctx.send_message(diagnosis)
 
+    @handler
+    async def on_consult(self, message: Consulted, ctx: WorkflowContext[AgentDiagnosis, AgentDiagnosis]) -> None:
+        consult = getattr(self._agent, "diagnose_consult", None)
+        if consult is not None:
+            diagnosis = consult(message.incident, self._gateway, message.request)
+        else:  # rule-based agents run their usual checks; they only record who asked
+            diagnosis = self._agent.diagnose(message.incident, self._gateway)
+            diagnosis = diagnosis.model_copy(update={"consulted_by": message.request.from_agent})
+        await ctx.yield_output(diagnosis)
+        await ctx.send_message(diagnosis)
+
 
 class CoordinatorExecutor(Executor):
     """Collects the diagnoses of the specialists triage selected, then correlates them."""
 
-    def __init__(self, coordinator: RCACoordinator, implemented: frozenset[str]) -> None:
+    def __init__(self, coordinator: RCACoordinator, implemented: frozenset[str], remediation: str) -> None:
         super().__init__(id=coordinator.name)
+        self._remediation = remediation
         self._coordinator = coordinator
         self._implemented = implemented
         self._triaged: TriagedIncident | None = None
         self._diagnoses: list[AgentDiagnosis] = []
+        self._consulted: list[str] = []  # agents started by a consult, in order
+        self._handled = 0  # diagnoses whose consult requests were already considered
 
     @handler
-    async def on_triage(self, message: TriagedIncident, ctx: WorkflowContext[Correlated]) -> None:
+    async def on_triage(self, message: TriagedIncident, ctx: WorkflowContext[Correlated | Consulted]) -> None:
         self._triaged = message
         await self._maybe_finish(ctx)
 
     @handler
-    async def on_diagnosis(self, message: AgentDiagnosis, ctx: WorkflowContext[Correlated]) -> None:
+    async def on_diagnosis(self, message: AgentDiagnosis, ctx: WorkflowContext[Correlated | Consulted]) -> None:
         self._diagnoses.append(message)
         await self._maybe_finish(ctx)
 
-    async def _maybe_finish(self, ctx: WorkflowContext[Correlated]) -> None:
+    async def _maybe_finish(self, ctx: WorkflowContext[Correlated | Consulted]) -> None:
         if self._triaged is None:
             return
         selected = self._triaged.triage.selected_agents
-        expected = [a for a in selected if a in self._implemented]
+        for diagnosis in self._diagnoses[self._handled:]:
+            for request in diagnosis.consults:
+                target = AGENT_FOR_DOMAIN.get(request.domain)
+                if (len(self._consulted) >= MAX_CONSULTS or target not in self._implemented
+                        or target in selected or target in self._consulted):
+                    continue
+                self._consulted.append(target)
+                await ctx.send_message(Consulted(self._triaged.incident, request), target_id=target)
+        self._handled = len(self._diagnoses)
+        expected = [a for a in selected if a in self._implemented] + self._consulted
         if len(self._diagnoses) < len(expected):
             return
         by_agent = {d.agent: d for d in self._diagnoses}
@@ -128,7 +164,7 @@ class CoordinatorExecutor(Executor):
             list(diagnoses),
             [a for a in selected if a not in self._implemented],
         )
-        await ctx.send_message(Correlated(rca, diagnoses))
+        await ctx.send_message(Correlated(rca, diagnoses), target_id=self._remediation)
 
 
 class RemediationExecutor(Executor):
@@ -182,10 +218,10 @@ async def run_diagnosis_async(
     triage_executor = TriageExecutor(
         LLMTriageAgent(llm, emit=trace.for_agent("triage-agent") if trace else no_trace) if llm is not None
         else TriageAgent())
-    coordinator = CoordinatorExecutor(
-        RCACoordinator(timedelta(minutes=profile.correlation_window_minutes)), implemented
-    )
     remediation = RemediationExecutor(RemediationAgent(profile))
+    coordinator = CoordinatorExecutor(
+        RCACoordinator(timedelta(minutes=profile.correlation_window_minutes)), implemented, remediation.id
+    )
     workers = [SpecialistExecutor(a, ScopedGateway(gateway, a.name, scopes, log, budget)) for a in specialists]
     builder = (
         WorkflowBuilder(start_executor=triage_executor, output_from="all")
@@ -194,6 +230,7 @@ async def run_diagnosis_async(
     )
     for worker in workers:
         builder.add_edge(worker, coordinator)
+        builder.add_edge(coordinator, worker)  # consults only (sent with target_id)
     builder.add_edge(coordinator, remediation)
     outputs = (await builder.build().run(incident)).get_outputs()
 
@@ -208,7 +245,8 @@ async def run_diagnosis_async(
         start_time=start,
         end_time=datetime.now(UTC),
         triage=triage,
-        diagnoses=[by_agent[a] for a in triage.selected_agents if a in by_agent],
+        diagnoses=[by_agent[a] for a in triage.selected_agents if a in by_agent]
+        + [d for a, d in by_agent.items() if a not in triage.selected_agents and d.consulted_by],
         unavailable_agents=[a for a in triage.selected_agents if a not in implemented],
         rca=results[0].rca,
         remediation=results[0].plan,
@@ -245,7 +283,8 @@ def render_report(run: DiagnosticRun) -> str:
         f"INCIDENT {run.incident_id}   run {run.run_id}",
         f"TRIAGE: {t.classification}{related}",
         f"RCA CLASSIFICATION: {rca.classification}   AFFECTED DOMAINS: {', '.join(rca.affected_domains) or 'none'}",
-        f"AGENTS RUN: {', '.join(d.agent for d in run.diagnoses) or 'none'}",
+        "AGENTS RUN: " + (", ".join(d.agent + (f" (consulted by {d.consulted_by})" if d.consulted_by else "")
+                                    for d in run.diagnoses) or "none"),
         f"AGENTS NOT AVAILABLE: {', '.join(run.unavailable_agents) or 'none'}",
         f"ROOT CAUSE: {'CONFIRMED' if run.root_cause_determined else 'NOT CONFIRMED (human review required)'}",
         "",
@@ -263,6 +302,16 @@ def render_report(run: DiagnosticRun) -> str:
     if discarded:
         lines.append("  discarded model proposals (not findings):")
         lines += [f"    - {agent}: {p}" for agent, p in discarded]
+    consults = [(d.agent, c) for d in run.diagnoses for c in d.consults]
+    if consults:
+        ran = {d.agent: d for d in run.diagnoses}
+        lines.append("\nCONSULTS (an agent asked another domain to look, on checked tool data)")
+        for agent, c in consults:
+            target = AGENT_FOR_DOMAIN[c.domain]
+            sent = ran.get(target) is not None and ran[target].consulted_by == agent
+            lines.append(f"  {agent} -> {target}: " + ("sent" if sent else "not sent (that agent already ran or "
+                                                         "the per-run limit was reached)"))
+            lines += [f"       because: {e.statement}   <{e.source}>" for e in c.evidence]
     lines.append("\nHYPOTHESES (ranked, unconfirmed)")
     for i, c in enumerate(open_causes, 1):
         lines.append(f"  {i}. [{c.domain}] ({c.confidence:.2f}) {c.cause}")

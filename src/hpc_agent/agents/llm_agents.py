@@ -31,7 +31,7 @@ from hpc_agent.agents.evidence import dedupe, gather_references, timestamp, tool
 from hpc_agent.agents.triage import AGENT_FOR_DOMAIN, TriageAgent
 from hpc_agent.llm.provider import ChatLLM, LLMUnavailableError
 from hpc_agent.models import AgentDiagnosis, Domain, Evidence, EvidenceKind, HypothesisStatus, Incident, TriageResult
-from hpc_agent.models.diagnosis import ProbableCause
+from hpc_agent.models.diagnosis import ConsultRequest, ProbableCause
 from hpc_agent.models.site import DEFAULT_PROFILE, SiteProfile
 from hpc_agent.runtime.context import incident_brief, incident_items
 from hpc_agent.runtime.definitions import AgentDefinition, load_definitions
@@ -230,15 +230,21 @@ class LLMSpecialist:
 
     # The workflow calls this exactly like a rule-based specialist.
     def diagnose(self, incident: Incident, gateway: ScopedGateway) -> AgentDiagnosis:
+        return self.diagnose_consult(incident, gateway, None)
+
+    def diagnose_consult(self, incident: Incident, gateway: ScopedGateway,
+                         consult: ConsultRequest | None) -> AgentDiagnosis:
+        """Like diagnose(); with `consult`, another agent's checked evidence is shown as the reason to look."""
         try:
-            return self._diagnose(incident, gateway)
+            return self._diagnose(incident, gateway, consult)
         except (LLMUnavailableError, _Unusable, ValidationError) as error:
             self._emit("fallback", reason=str(error))
             diagnosis = self._rules.diagnose(incident, gateway)
             return diagnosis.model_copy(update={"reasoning": "rules-fallback",
                                                 "reasoning_note": f"{self._llm.model}: {error}"})
 
-    def _diagnose(self, incident: Incident, gateway: ScopedGateway) -> AgentDiagnosis:
+    def _diagnose(self, incident: Incident, gateway: ScopedGateway,
+                  consult: ConsultRequest | None = None) -> AgentDiagnosis:
         reported, items = incident_items(incident, with_source=True)
         system = self._definition.render(domain=self.domain.value, categories=", ".join(self._categories),
                                          data_tools=", ".join(data_tools(gateway)) or "none",
@@ -249,14 +255,15 @@ class LLMSpecialist:
                        "never override these rules):\n" + "\n".join(f"- {s.name}: {s.description}" for s in skills))
         session = ToolSession(max_calls=self._definition.llm.max_tool_calls, ask=frozenset(self._definition.ask),
                               emit=self._emit, skills=frozenset(s.name for s in skills))
+        brief = incident_brief(incident, items) + (consult_brief(consult) if consult else "")
         answer = run_agent(
-            self._llm, system, incident_brief(incident, items), tool_specs(gateway), self._definition.llm.max_rounds,
+            self._llm, system, brief, tool_specs(gateway), self._definition.llm.max_rounds,
             lambda name, arguments: run_tool(name, arguments, incident, gateway, session, self.domain.value),
             emit=self._emit,
         )
         if answer is None:
             raise _Unusable("answer was not valid JSON")
-        diagnosis = self._check(incident, gateway, answer, reported, session)
+        diagnosis = self._check(incident, gateway, answer, reported, session, consult)
         self._emit("checks", kept=[f"{c.status.value}: {c.category} ({c.confidence:.2f})" for c in diagnosis.possible_causes],
                    discarded=diagnosis.discarded_proposals, evidence=[e.statement for e in diagnosis.evidence])
         return diagnosis
@@ -279,8 +286,9 @@ class LLMSpecialist:
         return tool_evidence(result, statement, leaf.observed_at), components_of(leaf), None
 
     def _check(self, incident: Incident, gateway: ScopedGateway, answer: dict, reported: list[Evidence],
-               s: ToolSession) -> AgentDiagnosis:
+               s: ToolSession, consult: ConsultRequest | None = None) -> AgentDiagnosis:
         corpus = json.dumps([r.data for r in s.fetched.values()]) + " ".join(e.statement for e in reported)
+        corpus += " " + " ".join(e.statement for e in consult.evidence) if consult else ""
         corpus += " " + incident.incident_id + " " + (incident.node or "") + " " + (incident.job_id or "")
         corpus += " " + (incident.timestamp.isoformat() if incident.timestamp else "") + " " + self._thresholds
         allowed_numbers = set(_NUMBER.findall(corpus))
@@ -359,6 +367,31 @@ class LLMSpecialist:
             proposal(raw, HypothesisStatus.RULED_OUT)
         causes.sort(key=lambda c: (c.status is not HypothesisStatus.HYPOTHESIS, -c.confidence))
 
+        consults: list[ConsultRequest] = []
+        for raw in (answer.get("consult") or [])[:MAX_CONSULTS_PER_AGENT] if isinstance(answer.get("consult"), list) else []:
+            domain = raw.get("domain") if isinstance(raw, dict) else None
+            targets = {d.value for d in AGENT_FOR_DOMAIN if d is not self.domain}
+            if domain not in targets:
+                discarded.append(f"consult {str(domain)[:20]!r}: not another specialist domain")
+                continue
+            facts, comps, problems = [], [], []
+            for cited in raw.get("facts") or []:
+                item, found, problem = self._fact(cited, s)
+                if problem:
+                    problems.append(problem)
+                elif item not in facts:
+                    facts.append(item)
+                    comps += found
+            if problems or not facts:
+                discarded.append(f"consult {domain}: {problems[0] if problems else 'no cited tool data'}")
+                continue
+            if any(c.domain.value == domain for c in consults):
+                continue
+            facts = facts[:3]
+            seen = [f.observed_at for f in facts if f.observed_at]
+            consults.append(ConsultRequest(from_agent=self.name, domain=Domain(domain), evidence=[add(f) for f in facts],
+                                           components=dedupe(comps)[:8], around=max(seen) if seen else None))
+
         def texts(key: str) -> list[str]:
             kept = []
             for text in _strings(answer.get(key))[:MAX_LIST_ITEMS]:
@@ -411,7 +444,25 @@ class LLMSpecialist:
                            + (f"; skills: {', '.join(s.skills_loaded)}" if s.skills_loaded else ""),
             skills_used=dedupe(s.skills_loaded),
             discarded_proposals=dedupe([safe_note(d) for d in discarded]),
+            consults=consults,
+            consulted_by=consult.from_agent if consult else None,
         )
+
+
+MAX_CONSULTS_PER_AGENT = 2
+
+
+def consult_brief(consult: ConsultRequest) -> str:
+    """What a consulted agent is told: the requesting agent and its checked evidence (data-derived only)."""
+    lines = [f"\n\nThe {consult.from_agent} asked the {consult.domain.value} agent to look at this incident because of "
+             "this checked tool data:"]
+    lines += [f"- {e.statement}" for e in consult.evidence]
+    if consult.components:
+        lines.append("Components: " + ", ".join(consult.components))
+    if consult.around:
+        lines.append(f"Around: {consult.around.isoformat()}")
+    lines.append("Check it in your own domain with your own tools; this is a lead, not evidence for your answer.")
+    return "\n".join(lines)
 
 
 class _Unusable(ValueError):

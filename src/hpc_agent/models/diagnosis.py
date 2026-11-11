@@ -122,6 +122,34 @@ class ProbableCause(BaseModel):
         return self
 
 
+AgentName = Annotated[str, Field(pattern=r"^[a-z][a-z0-9-]*-agent$")]
+
+
+class ConsultRequest(BaseModel):
+    """A specialist asks another domain's agent to look at this incident.
+
+    Carries only checked tool evidence (statements written from the data, never the model's words),
+    the components that evidence names and when it was observed. The coordinator decides whether the
+    request is sent (limits, each agent at most once per run); the consulted agent keeps its own scope.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    from_agent: AgentName
+    domain: Domain
+    evidence: list[Evidence] = Field(min_length=1, max_length=3)
+    components: list[NonEmptyStr] = Field(default_factory=list, max_length=8)
+    around: datetime | None = None
+
+    @model_validator(mode="after")
+    def _tool_evidence_only(self) -> ConsultRequest:
+        if any(e.kind is not EvidenceKind.TOOL_RESULT for e in self.evidence):
+            raise ValueError("a consult rests on tool evidence only")
+        if self.around is not None and self.around.tzinfo is None:
+            raise ValueError("around must be timezone-aware")
+        return self
+
+
 class AgentDiagnosis(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -144,6 +172,10 @@ class AgentDiagnosis(BaseModel):
     discarded_proposals: list[NonEmptyStr] = Field(default_factory=list)
     # Skills (repository procedures) the agent read, as name@sha256-prefix; reference only, never evidence.
     skills_used: list[NonEmptyStr] = Field(default_factory=list)
+    # Other domains this agent asked to look (sent only if the coordinator accepts them).
+    consults: list[ConsultRequest] = Field(default_factory=list, max_length=2)
+    # Set when this agent ran because another agent consulted it, not because triage selected it.
+    consulted_by: AgentName | None = None
     human_approval_required: Literal[True] = True
 
     @model_validator(mode="after")
@@ -160,6 +192,11 @@ class AgentDiagnosis(BaseModel):
             cited = cause.supporting_evidence + cause.conflicting_evidence
             if any(e not in self.evidence for e in cited):
                 raise ValueError("cause evidence must be part of the diagnosis evidence")
+        for consult in self.consults:
+            if consult.from_agent != self.agent or consult.domain is self.domain:
+                raise ValueError("a consult comes from this agent and names another domain")
+            if any(e not in self.evidence for e in consult.evidence):
+                raise ValueError("consult evidence must be part of the diagnosis evidence")
         return self
 
     @property

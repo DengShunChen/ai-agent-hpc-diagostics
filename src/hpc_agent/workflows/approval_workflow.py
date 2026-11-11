@@ -120,7 +120,9 @@ def build_approval_request(run: DiagnosticRun, status: ApprovalStatus) -> Approv
         deferred=[f"({d.confidence:.2f}) {d.cause}: {d.reason}" for d in run.remediation.deferred]
         if run.remediation else [],
         agents=[AgentReasoning(agent="triage-agent", reasoning=run.triage.reasoning, note=run.triage.reasoning_note),
-                *(AgentReasoning(agent=d.agent, reasoning=d.reasoning, note=d.reasoning_note) for d in run.diagnoses)],
+                *(AgentReasoning(agent=d.agent, reasoning=d.reasoning,
+                                 note=d.reasoning_note + (f"; consulted by {d.consulted_by}" if d.consulted_by else ""))
+                  for d in run.diagnoses)],
         discarded_proposals=[f"{d.agent}: {p}" for d in run.diagnoses for p in d.discarded_proposals],
         note=note,
     )

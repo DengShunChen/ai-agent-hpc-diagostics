@@ -4,6 +4,7 @@ from hpc_agent.models.approval import ActionForReview, ApprovalRecord, ApprovalR
 from hpc_agent.models.audit import AuditRecord, ToolInvocationRecord
 from hpc_agent.models.diagnosis import (
     AgentDiagnosis,
+    ConsultRequest,
     DeferredHypothesis,
     Domain,
     Evidence,
@@ -22,6 +23,7 @@ from hpc_agent.models.triage import TriageResult
 __all__ = [
     "ActionForReview",
     "AgentDiagnosis",
+    "ConsultRequest",
     "DeferredHypothesis",
     "ApprovalRecord",
     "ApprovalRequest",
