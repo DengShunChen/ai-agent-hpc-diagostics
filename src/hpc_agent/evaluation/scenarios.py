@@ -259,6 +259,9 @@ def evaluate_scenarios(
                 fallbacks = ([f"triage-agent: {safe_text(run.triage.reasoning_note)}"]
                              if run.triage.reasoning == "rules-fallback" else []) + [
                     f"{d.agent}: {safe_text(d.reasoning_note)}" for d in run.diagnoses if d.reasoning == "rules-fallback"]
+                recorded = {f.split(":", 1)[0] for f in fallbacks}  # cross-check: the trace is the ground truth
+                fallbacks += [f"{agent}: fell back in the trace but not in the run record"
+                              for agent in sorted({e["agent"] for e in trace.events if e["kind"] == "fallback"} - recorded)]
                 logs.append(LogResult(**{**base, "component_hit": (bool(lead) and bool(faulty & set(lead.components)))
                                          if faulty else None,
                                          "model_complete": None if llm is None else not fallbacks},

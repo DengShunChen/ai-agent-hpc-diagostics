@@ -176,7 +176,8 @@ node's job really did hit its time limit, so `scheduler.walltime` is not forbidd
   `eval-freeze-1`):** when an agent started by a consult could not use the model and fell back to the rules, its
   diagnosis lost `consulted_by`, so the workflow left it out of `run.diagnoses` (the RCA still used it) and the
   evaluation counted the run as model-complete. On the 8 paired cases this reported model completion 4/8 where
-  the traces show 3/8. The fallback now keeps `consulted_by`, and the run keeps every agent that ran. Diagnoses
+  the traces show 3/8. The fallback now keeps `consulted_by`, the run keeps every agent that ran, and model completion is
+  cross-checked against the trace (a fallback in the trace that the run record lacks counts as incomplete). Diagnoses
   are unchanged; only the run record and the completion count change. Results measured on `eval-freeze-1` are
   not rerun and carry this defect.
 - Results on the dev sets after these changes are not an independent test of them. A blind set from the

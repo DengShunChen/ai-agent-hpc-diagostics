@@ -237,3 +237,19 @@ def test_r2_interrupt_after_the_run_was_written_closes_the_batch(tmp_path, monke
     assert json.loads((runs / "SIM-E-002.run.json").read_text())["status"] == "completed"  # kept as written
     progress = [json.loads(x)["status"] for x in (runs / "progress.jsonl").read_text().splitlines()]
     assert progress == ["completed", "completed", "interrupted after diagnosis"]
+
+
+def test_a_fallback_in_the_trace_counts_even_if_the_run_record_misses_it(tmp_path, monkeypatch):
+    """model_complete is cross-checked against the trace, so a record that loses an agent cannot pass as complete."""
+    real = scenarios.run_diagnosis
+
+    def losing_record(*args, trace=None, **kwargs):
+        run = real(*args, trace=trace, **kwargs)
+        trace.record("network-agent", "fallback", reason="model unavailable")  # an agent the record does not show
+        return run
+
+    monkeypatch.setattr(scenarios, "run_diagnosis", losing_record)
+    results, summary, logs = evaluate_scenarios(make(tmp_path, faults=("segfault",)), llm=DownLLM())
+    [log] = logs
+    assert log.model_complete is False
+    assert "network-agent: fell back in the trace but not in the run record" in log.fallbacks

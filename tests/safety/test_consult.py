@@ -2,6 +2,7 @@
 
 import pytest
 
+from hpc_agent.llm.claude import BudgetExceededError
 from hpc_agent.llm.provider import LLMUnavailableError
 from hpc_agent.safety.guards import verify_run
 from hpc_agent.workflows import diagnostic_workflow
@@ -118,6 +119,35 @@ def test_consults_can_chain_across_domains(tmp_path, scopes):
     report = render_report(result)
     assert "network-agent (consulted by scheduler-agent)" in report
     assert "scheduler-agent -> network-agent: sent" in report and "because: " in report
+
+
+def test_a_second_hop_agent_that_hits_the_budget_is_kept_once(tmp_path, scopes):
+    """scheduler -> network -> storage, where storage cannot spend: it is kept once, as a consulted fallback."""
+    from hpc_agent.tools.gateway import build_default_gateway
+    from tests.conftest import make_data_root
+
+    incident = {"incident_id": "SIM-CHAIN-002", "severity": "high", "node": "sim-node-0201", "job_id": "SIM-JOB-1",
+                "symptoms": ["job failed with exit code 5"]}
+    adapter = make_data_root(tmp_path, incident, {
+        "scheduler/job_status": {"job_id": "SIM-JOB-1", "state": "FAILED", "exit_code": 5,
+                                 "allocated_nodes": ["sim-node-0201"]},
+        "network/network_status": {"interfaces": [{"node": "sim-node-0201", "interface": "ib0", "state": "up",
+                                                    "rx_errors": 0, "tx_errors": 0, "link_flaps": 6}]}})
+    exit5 = {"ref": "T1", "field": "exit_code", "value": 5}
+    flaps = {"ref": "T1", "field": "link_flaps", "value": 6, "where": "sim-node-0201"}
+    llm = FakeLLM({
+        "triage": TRIAGE_SCHEDULER,
+        "scheduler": [calls("get_job_status"), answer(consult=[{"domain": "network", "facts": [exit5]}])],
+        "network": [calls("get_network_status"), answer(consult=[{"domain": "storage", "facts": [flaps]},
+                                                                 {"domain": "scheduler", "facts": [flaps]}])],
+        "storage": [BudgetExceededError("Claude spend cap reached")],
+    })
+    result = run_diagnosis(adapter.load_incident("SIM-CHAIN-002"), build_default_gateway(adapter), scopes, llm=llm)
+    assert agents(result) == ["scheduler-agent", "network-agent", "storage-agent"]  # each once, none re-run
+    assert [d.consulted_by for d in result.diagnoses] == [None, "scheduler-agent", "network-agent"]
+    assert [d.reasoning for d in result.diagnoses][2] == "rules-fallback"
+    assert sum(d == "scheduler" for d, _, _ in llm.seen) == 2
+    verify_run(result, scopes)
 
 
 def test_rule_based_runs_never_consult(adapter, gateway, scopes):
