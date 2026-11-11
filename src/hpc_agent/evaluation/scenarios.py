@@ -52,7 +52,8 @@ def _cited(run, pseudonymizer: Pseudonymizer) -> set[tuple[str, str, int]]:
     for e in evidence:
         match = _LOG_FACT.search(e.statement)
         if match and e.source and "/logs/" in e.source:
-            source = e.source.rsplit("/", 1)[-1].removesuffix(".json")
+            log = re.search(r"\blog=(\w+)", e.statement)  # analyze_logs rows name their source
+            source = log.group(1) if log else e.source.rsplit("/", 1)[-1].removesuffix(".json")
             out.add((source, match.group("node"), int(match.group("line"))))
     return out
 

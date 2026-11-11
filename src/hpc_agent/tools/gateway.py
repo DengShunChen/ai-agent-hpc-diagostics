@@ -45,6 +45,10 @@ _ARG_PATTERNS = {
     # Log search: a fixed list of sources, and keywords with the same character set as a query.
     "source": re.compile(r"slurmctld|slurmd|pjm|syslog"),
     "keywords": re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._/-]{0,119}"),
+    # Log analysis: one of a fixed set of operations, a second keyword set, a window in seconds.
+    "operation": re.compile(r"count_by_node|timeline|near|nodes_with_both"),
+    "also_keywords": re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._/-]{0,119}"),
+    "window_seconds": re.compile(r"[1-9][0-9]{0,3}"),
 }
 DEFAULT_CALL_BUDGET = 40
 

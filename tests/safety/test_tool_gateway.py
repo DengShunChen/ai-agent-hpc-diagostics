@@ -15,6 +15,7 @@ SHELL_LIKE = sorted(FORBIDDEN_TOOL_NAMES) + [
     "exec", "eval", "sudo_read", "os_system", "popen", "spawn_process", "reboot_node", "delete_ost",
 ]
 EXPECTED_TOOLS = (
+    "analyze_logs",  # fixed analyses over the saved, de-identified log index; read-only, no expressions
     "get_filesystem_usage",
     "get_gpu_health",
     "get_job_status",

@@ -62,7 +62,8 @@ _COMMANDS = re.compile(
 _CONFIRMED = re.compile(r"\b(confirmed|definitely|certainly|proven|the root cause is)\b", re.IGNORECASE)
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
 _REFERENCE = re.compile(r"\b[TI]\d+\b")  # labels the prompt itself asks for: T# tool results, I# incident items
-_CONTEXT_KEYS = ("filesystem", "ost", "job_id", "node", "interface", "index", "line")  # line: a log line number
+# line: a log line number; match/log/bucket: analyze_logs rows (what was matched, which log, which time bucket)
+_CONTEXT_KEYS = ("filesystem", "ost", "job_id", "match", "log", "node", "interface", "index", "bucket", "line")
 _TIME_KEYS = ("timestamp", "state_changed_at", "last_change", "end_time", "collected_at")
 WITHHELD = "a proposal was withheld (SENSITIVE INFORMATION DETECTED AND NOT PROCESSED.)"
 

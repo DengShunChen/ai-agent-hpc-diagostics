@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from hpc_agent.models import Incident
 from hpc_agent.runtime.hooks import CallContext, post_tool_use, pre_tool_use
 from hpc_agent.runtime.trace import Emit, no_trace
-from hpc_agent.tools.log_tools import LOG_SOURCES
+from hpc_agent.tools.log_tools import ANALYSES, LOG_SOURCES, MAX_WINDOW_SECONDS
 from hpc_agent.tools.gateway import ScopedGateway, ToolArgumentError, ToolNotAllowedError, ToolResult, ToolStatus
 
 MAX_RESULT_CHARS = 3000
@@ -47,9 +47,19 @@ def tool_specs(gateway: ScopedGateway) -> list[dict]:
         if "source" in params:
             properties = {"source": {"type": "string", "enum": list(LOG_SOURCES), "description": "which saved log"},
                           "keywords": {"type": "string", "description": "words every line must contain"}}
+        required = sorted(properties)
+        if "operation" in params:
+            properties = {
+                "operation": {"type": "string", "enum": list(ANALYSES), "description": "which analysis"},
+                "keywords": {"type": "string", "description": "words a line must contain (the anchor, for near)"},
+                "also_keywords": {"type": "string", "description": "second set of words (near, nodes_with_both)"},
+                "window_seconds": {"type": "integer", "description": f"near: seconds after an anchor line; "
+                                   f"timeline: bucket size (1-{MAX_WINDOW_SECONDS})"},
+            }
+            required = ["keywords", "operation"]
         specs.append({"type": "function", "function": {
             "name": tool, "description": description,
-            "parameters": {"type": "object", "properties": properties, "required": sorted(properties)},
+            "parameters": {"type": "object", "properties": properties, "required": required},
         }})
     return specs
 
@@ -74,6 +84,24 @@ def run_tool(name: str, arguments: dict, incident: Incident, gateway: ScopedGate
                          reason="needs source and keywords", requested=arguments)
             return f"error: {name} needs source (one of {', '.join(LOG_SOURCES)}) and keywords"
         kwargs |= {"source": source, "keywords": keywords[:120]}
+    if "operation" in params:
+        operation = str(arguments.get("operation") or "")
+        keywords = " ".join(str(arguments.get("keywords") or "").split())[:120]
+        also = " ".join(str(arguments.get("also_keywords") or "").split())[:120]
+        try:
+            window = min(max(int(arguments.get("window_seconds") or (600 if operation == "timeline" else 300)), 1),
+                         MAX_WINDOW_SECONDS)
+        except (TypeError, ValueError):
+            window = 0
+        pair = operation in ("near", "nodes_with_both")
+        if operation not in ANALYSES or not keywords or (pair and not also) or not window:
+            session.emit("tool_call", tool=name, permission=ctx.permission.value, decision="denied",
+                         reason="needs operation, keywords (and also_keywords for near/nodes_with_both)",
+                         requested=arguments)
+            return (f"error: {name} needs operation (one of {', '.join(ANALYSES)}), keywords, also_keywords for near "
+                    "and nodes_with_both, and an integer window_seconds")
+        kwargs |= {"operation": operation, "keywords": keywords, "also_keywords": also or keywords,
+                   "window_seconds": str(window)}
     if "skill" in params:
         requested = str(arguments.get("skill") or "").strip()
         if requested not in session.skills:  # only names from the agent's own index
