@@ -66,4 +66,6 @@ logs before the drill (Codex or the drill owner runs steps 1, 2 and 5).
    `drill-summary.md` gives median minutes and the share of correct answers per arm, side by side: a faster
    wrong answer is not an improvement. With 4 engineers × 12 scenarios there are 24 answers per arm.
 
+Engineers get `engineer-guide.zh-TW.md` (instructions in Traditional Chinese).
+
 Keep filled-in drill files out of Git, like pilot files. Engineer codes, not names.
