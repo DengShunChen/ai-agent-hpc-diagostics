@@ -8,7 +8,7 @@ from tests.conftest import make_data_root
 
 A, B, C = "sim-node-0001", "sim-node-0002", "sim-node-0003"
 LINK = "kernel: mlx5_core 0000:5e:00.0: mlx5_port_event: port 1 link down"
-LUSTRE = "kernel: LustreError: 11-0: fs-01-OST0003-osc: operation ost_write to node 10.0.0.3@o2ib failed: rc = -110"
+LUSTRE = "kernel: LustreError: 11-0: fs-01-OST0003-osc: operation ost_write to node sim-oss-03@o2ib failed: rc = -110"
 
 
 def line(n, node, hour, minute, text):
