@@ -231,6 +231,12 @@ node's job really did hit its time limit, so `scheduler.walltime` is not forbidd
   LLM stage, merge and final check now are (interrupts still propagate). (R3b) a linked `names/` directory passed
   the leaf check; every path component from the drill input down to a copied file must now be a plain directory
   or file inside it.
+- **PJM CSV parsing (2026-11-12, found by the independent test on eval-freeze-3):** the `pjstat` parser split
+  CSV rows on every comma, so a valid quoted `NODE_LIST` such as `"sim-fxnode[8001,8003]"` shifted the columns and
+  the allocated nodes were lost (all 6 independently designed FX1000 cases; the log digest then had no nodes to
+  look at, 0/6). Node-list expansion also inserted a `-` between prefix and number (`node[01]` became `node-01`).
+  The parser now reads CSV properly and keeps the prefix as written. Dev check unchanged (rules answers identical,
+  key line quoted in 32 of 35). The frozen eval-freeze-3 results keep the defect and are not rerun on that tag.
 - Results on the dev sets after these changes are not an independent test of them. A blind set from the
   same catalog tests unseen instances only; independently designed cases are the stronger test
   ([evaluation-protocol.md](evaluation-protocol.md)).

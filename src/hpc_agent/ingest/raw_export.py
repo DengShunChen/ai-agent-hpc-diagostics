@@ -31,6 +31,7 @@ name, or in a command output) is not known to the pseudonymizer and stays as wri
 
 from __future__ import annotations
 
+import csv
 import json
 import re
 from datetime import UTC, datetime
@@ -45,7 +46,7 @@ MAX_LINES_PER_SOURCE = 6000
 NODE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _BRACKET = re.compile(r"^\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?)\] (.+)$")
 _SYSLOG = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})) (\S+) (.+)$")
-_HOSTLIST = re.compile(r"^(?P<prefix>[A-Za-z0-9._-]+?)-?\[(?P<ranges>[0-9,-]+)\]$")
+_HOSTLIST = re.compile(r"^(?P<prefix>[A-Za-z0-9._-]+)\[(?P<ranges>[0-9,-]+)\]$")  # prefix kept as written
 _DCGM = re.compile(r"^GPU (\d+) \| PCI (\S+) \| (\w+) \| temp (-?\d+) C \| DBE (\d+) \|")
 _XID = re.compile(r"NVRM: Xid \(PCI:([0-9a-fA-F:.]+)\): (\d+),")
 _COUNTERS = {"SymbolErrorCounter": "symbol", "LinkDownedCounter": "link_downed", "PortRcvErrors": "rcv",
@@ -179,7 +180,8 @@ def _syslog(lines: list[tuple[int, str]]) -> dict:
 # --- command output ----------------------------------------------------------------------------------
 
 def expand_hostlist(text: str) -> list[str]:
-    """sim-node-[0003-0005,0009] -> [sim-node-0003, ...]; comma-separated plain names are split."""
+    """sim-node-[0003-0005,0009] -> [sim-node-0003, ...]; node[01-02] -> [node01, node02] (the prefix is kept
+    exactly as written, as in Slurm and PJM node lists); comma-separated plain names are split."""
     names: list[str] = []
     for part in re.split(r",(?![^\[]*\])", text.strip()):
         match = _HOSTLIST.match(part)
@@ -192,7 +194,7 @@ def expand_hostlist(text: str) -> list[str]:
             low, _, high = item.partition("-")
             width = len(low)
             for n in range(int(low), int(high or low) + 1):
-                names.append(f"{prefix}-{n:0{width}d}")
+                names.append(f"{prefix}{n:0{width}d}")
     return names
 
 
@@ -227,9 +229,10 @@ def _sacct(lines: list[tuple[int, str]], job_id: str) -> dict | None:
 def _pjstat(lines: list[tuple[int, str]], job_id: str) -> dict | None:
     if not lines:
         return None
-    header = lines[0][1].split(",")
-    for _, line in lines[1:]:
-        row = dict(zip(header, line.split(","), strict=False))
+    rows = list(csv.reader(text for _, text in lines))  # CSV: a quoted NODE_LIST may itself contain commas
+    header = rows[0]
+    for values in rows[1:]:
+        row = dict(zip(header, values, strict=False))
         if row.get("JOB_ID") != job_id:
             continue
         code, sig = row.get("END_CODE", ""), row.get("SIGNAL", "")

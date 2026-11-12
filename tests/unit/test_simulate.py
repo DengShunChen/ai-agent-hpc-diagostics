@@ -217,3 +217,21 @@ def test_stratified_blind_set_covers_every_fault_and_platform():
     cells = Counter((s.platform, s.fault) for s in a)
     assert len(a) == 2 * len(ALL_FAULTS) * 2 and set(cells.values()) == {2}
     assert [s.fault for s in a] != [s.fault for s in stratified_scenarios(12, 2, faults=ALL_FAULTS, platforms=PLATFORMS)]
+
+
+def test_hostlist_prefix_is_kept_as_written():
+    assert expand_hostlist("sim-fxnode[8001,8003]") == ["sim-fxnode8001", "sim-fxnode8003"]
+    assert expand_hostlist("sim-node-[0003-0004]") == ["sim-node-0003", "sim-node-0004"]
+
+
+def test_a_quoted_pjm_node_list_with_commas_is_parsed():
+    """Found by the independent test: a valid CSV NODE_LIST like "a[1,3]" was split on its commas."""
+    from hpc_agent.ingest.raw_export import _pjstat
+
+    lines = list(enumerate([
+        "JOB_ID,JOB_NAME,MD,ST,START_DATE,END_DATE,ELAPSE_TIM,ELAPSE_LIM,NODE,NODE_LIST,PJM_CODE,END_CODE,SIGNAL,REASON",
+        'sim-job-1,sim-solver,NM,EXT,2026-01-01T00:00:00,2026-01-01T00:10:00,00:10:00,00:10:00,2,'
+        '"sim-fxnode[8001,8003]",1,0,9,ELAPSE LIMIT EXCEEDED'], 1))
+    job = _pjstat(lines, "sim-job-1")
+    assert job["allocated_nodes"] == ["sim-fxnode8001", "sim-fxnode8003"]
+    assert job["exit_code"] == 137 and job["termination_reason"] == "ELAPSE LIMIT EXCEEDED"
