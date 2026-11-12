@@ -216,6 +216,16 @@ node's job really did hit its time limit, so `scheduler.walltime` is not forbidd
   11/12, novel 10/10; misses: SIM-DEV-003 walltime, SIM-DEV-004 and SIM-FX-004 admin cancel, whose key lines carry
   no error term). Digests hold 0-6 lines on these ~2,000-line logs; real logs are far
   larger, and digest size there is unmeasured.
+- **Acceptance-5 fixes (2026-11-12, Codex rejected eval-candidate-6 with four defects, reproduced offline):**
+  (R1) a failed LLM stage (budget, model or guard failure) erased the rules' finished answer and dropped the case
+  from the cascade tables; the rules' result is now kept, `cascade.ai_error` records the failure, the model counts
+  as not completed, and the report counts such cases. (R2) an LLM-stage rules fallback repeated the rules' lead in
+  second place while the second opinion was scored from another cause; fallback diagnoses stay in the record but
+  are not ranked again, and the second opinion is taken from what the report shows right below the rules' lead.
+  (R3) drill-prepare followed links inside an export, so a renamed link could carry labels into a packet; links
+  and special files are now refused before anything is written, and only regular files are copied. (R4) drill-score
+  removed a wrong answer with missing times from the correctness denominator; correctness and time now have
+  separate denominators, and an empty answer counts as wrong. None of these changes uses any new-set result.
 - Results on the dev sets after these changes are not an independent test of them. A blind set from the
   same catalog tests unseen instances only; independently designed cases are the stronger test
   ([evaluation-protocol.md](evaluation-protocol.md)).

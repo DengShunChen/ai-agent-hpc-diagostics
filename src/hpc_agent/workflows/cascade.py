@@ -33,6 +33,7 @@ from hpc_agent.models.site import SiteProfile
 from hpc_agent.runtime.definitions import load_definitions, outcome_categories
 from hpc_agent.runtime.trace import TraceRecorder
 from hpc_agent.safety.guards import verify_run
+from hpc_agent.safety.secrets import find_credential_like
 from hpc_agent.tools.gateway import ToolGateway
 from hpc_agent.workflows.diagnostic_workflow import run_diagnosis
 
@@ -76,32 +77,52 @@ def run_cascade(
             escalated=False, reason=reason, rules_lead=rules_lead, rules_seconds=rules_seconds)})
 
     started = time.monotonic()
-    ai = run_diagnosis(incident, gateway, scopes, profile=profile, llm=llm, trace=trace)
+    try:
+        ai = run_diagnosis(incident, gateway, scopes, profile=profile, llm=llm, trace=trace)
+    except Exception as error:  # noqa: BLE001 - a failed LLM stage must not erase the rules' checked answer
+        # Budget exhausted, model or guard failure: nothing from the LLM stage is kept, the rules' result is,
+        # and the record says the model did not finish (never counted as a completed model run).
+        note = f"{type(error).__name__}: {str(error)[:200]}"
+        note = type(error).__name__ if find_credential_like(note) else note
+        if trace is not None:
+            trace.record("cascade", "fallback", reason=f"LLM stage failed: {note}")
+        return rules.model_copy(update={"cascade": CascadeRecord(
+            escalated=True, reason=reason + "; the LLM agents did not finish, so the rules' result is kept",
+            rules_lead=rules_lead, rules_seconds=rules_seconds, ai_seconds=time.monotonic() - started,
+            ai_error=note)})
     ai_seconds = time.monotonic() - started
     # Causes the LLM agents grounded in tool data (not a rules fallback), in a category that names a cause.
-    ai_causes = [c for d in ai.diagnoses if d.reasoning == "llm" for c in d.hypotheses
-                 if c.category not in outcomes and _supported(c)]
-    ai_categories = {c.category for c in ai_causes}
+    llm_diagnoses = [d for d in ai.diagnoses if d.reasoning == "llm"]
+    ai_causes = [c for d in llm_diagnoses for c in d.hypotheses if c.category not in outcomes and _supported(c)]
+    ai_keys = {(c.category, c.cause) for c in ai_causes}
     rules_lead_cause = next((c.cause for c in rules.rca.probable_causes if c.status is HypothesisStatus.HYPOTHESIS), None)
     rules_causes = {(c.category, c.cause) for d in rules.diagnoses for c in d.possible_causes}
-    diagnoses = [*ai.diagnoses, *rules.diagnoses]  # both runs, each agent's diagnosis once per run
+    diagnoses = [*ai.diagnoses, *rules.diagnoses]  # both runs' records, each agent's diagnosis once per run
 
     def rank(c: ProbableCause) -> int:
         # The rules' lead first, the LLM agents' checked causes right below it, then the rest.
         if (c.category, c.cause) == (rules_lead, rules_lead_cause):
             return 0
-        if c.category in ai_categories and (c.category, c.cause) not in rules_causes:
+        if (c.category, c.cause) in ai_keys and (c.category, c.cause) not in rules_causes:
             return 1
         return 2
 
+    rca, plan, second = rules.rca, rules.remediation, None
     if ai_causes:
-        rca = RCACoordinator(timedelta(minutes=profile.correlation_window_minutes)).correlate(
-            incident, ai.triage, diagnoses, ai.unavailable_agents, rank=rank)
-        actions, plan = RemediationAgent(profile).plan(rca, diagnoses)
-        merged: list[RecommendedAction] = list(rca.recommended_actions)
-        merged += [a for a in actions if all(a.action != m.action for m in merged)]
-        rca = rca.model_copy(update={"recommended_actions": merged})
-        second = max(ai_causes, key=lambda c: c.confidence)
+        # Ranked from the rules' diagnoses and the LLM agents' own; an LLM-stage rules fallback repeats the
+        # rules' causes, so it stays in the record but is not ranked again.
+        ranked = RCACoordinator(timedelta(minutes=profile.correlation_window_minutes)).correlate(
+            incident, ai.triage, [*llm_diagnoses, *rules.diagnoses], ai.unavailable_agents, rank=rank)
+        shown = [c for c in ranked.probable_causes if c.status is HypothesisStatus.HYPOTHESIS]
+        if shown and (shown[0].category, shown[0].cause) == (rules_lead, rules_lead_cause):
+            actions, plan = RemediationAgent(profile).plan(ranked, diagnoses)
+            merged: list[RecommendedAction] = list(ranked.recommended_actions)
+            merged += [a for a in actions if all(a.action != m.action for m in merged)]
+            rca = ranked.model_copy(update={"recommended_actions": merged})
+            # The second opinion is what the report shows right below the rules' lead, nothing else.
+            if len(shown) > 1 and (shown[1].category, shown[1].cause) in ai_keys:
+                second = shown[1]
+    if second is not None:
         record = CascadeRecord(escalated=True, reason=reason, rules_lead=rules_lead, ai_lead=second.category,
                                rules_seconds=rules_seconds, ai_seconds=ai_seconds)
     else:

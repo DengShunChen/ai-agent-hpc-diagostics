@@ -273,6 +273,8 @@ def evaluate_scenarios(
                 fallbacks = ([f"triage-agent: {safe_text(run.triage.reasoning_note)}"]
                              if run.triage.reasoning == "rules-fallback" else []) + [
                     f"{d.agent}: {safe_text(d.reasoning_note)}" for d in run.diagnoses if d.reasoning == "rules-fallback"]
+                if run.cascade and run.cascade.ai_error:  # the LLM stage failed and the rules' result was kept
+                    fallbacks.append(f"cascade: LLM stage failed: {safe_text(run.cascade.ai_error)}")
                 recorded = {f.split(":", 1)[0] for f in fallbacks}  # cross-check: the trace is the ground truth
                 fallbacks += [f"{agent}: fell back in the trace but not in the run record"
                               for agent in sorted({e["agent"] for e in trace.events if e["kind"] == "fallback"} - recorded)]
@@ -389,7 +391,9 @@ def _cascade_section(rows: list[LogResult], by_id: dict, planned: int) -> list[s
 
     return ["", "### Cascade (rules first, LLM agents only where the rules lead with an outcome)", "",
             f"Escalated to the LLM agents: **{len(escalated)} of {len(rows)}** cases that ran ({planned} planned; "
-            "failed cases have no cascade record). Median time: rules "
+            f"**{planned - len(rows)}** failed before the rules answered and are in no table below; "
+            f"**{sum(bool(r.fallbacks) for r in escalated)}** escalated cases where the model did not finish, kept with "
+            "the rules' answer). Median time: rules "
             f"{median([r.rules_seconds for r in rows if r.rules_seconds is not None])}, LLM agents on escalated cases "
             f"{median([r.ai_seconds for r in escalated if r.ai_seconds is not None])}.", "",
             "Category top-1 against the rules alone on the same cases (the rules' lead stays first, so a right-to-wrong "

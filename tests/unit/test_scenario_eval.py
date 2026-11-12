@@ -270,3 +270,23 @@ def test_a_cascade_run_records_escalation_and_compares_with_the_rules_alone(tmp_
 def test_a_cascade_needs_a_model(tmp_path):
     with pytest.raises(BatchInvalid, match="cascade"):
         evaluate_scenarios(make(tmp_path, faults=("segfault",)), cascade=True)
+
+
+def test_a_failed_llm_stage_keeps_the_rules_answer_in_the_cascade_tables(tmp_path, monkeypatch):
+    from hpc_agent.tools.gateway import ToolNotAllowedError
+    from hpc_agent.workflows import cascade as cascade_module
+
+    real = cascade_module.run_diagnosis
+
+    def budget_spent_in_llm_stage(*args, llm=None, **kwargs):
+        if llm is not None:
+            raise ToolNotAllowedError("tool call budget exhausted (scheduler-agent -> get_job_status)")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(cascade_module, "run_diagnosis", budget_spent_in_llm_stage)
+    results, _, logs = evaluate_scenarios(make(tmp_path, faults=("walltime",)), llm=DownLLM(), cascade=True)
+    (log,), (result,) = logs, results
+    assert not log.error and result.outcome != "failed"  # the rules' answer survives
+    assert log.escalated is True and log.rules_top1 is not None and log.model_complete is False
+    assert any(f.startswith("cascade: LLM stage failed: ToolNotAllowedError") for f in log.fallbacks)
+    assert "**1** escalated cases where the model did not finish" in render_log_section(logs, results)

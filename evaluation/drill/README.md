@@ -33,8 +33,11 @@ logs before the drill (Codex or the drill owner runs steps 1, 2 and 5).
 1. **Generate a blind set** outside the repository. Keep the seed; don't look at `labels/`:
 
    ```bash
-   PYTHONPATH=src .venv/bin/python -m hpc_agent.main simulate --blind-seed <random number> --count 12 --faults all --platform both --output ~/drill-2026-11/sim
+   PYTHONPATH=src .venv/bin/python -m hpc_agent.main simulate --blind-seed <random number> --count 12 --faults all --platform tcs-fx1000 --output ~/drill-2026-11/sim
    ```
+
+   `--count` draws from one platform (`--platform both` needs `--per-fault`); to mix platforms, generate each
+   half with the same API and merge them, as the evaluator did for the first drill set.
 
 2. **Write the packets** (imports the export, diagnoses every scenario, splits halves A/B and the engineers
    into two groups, crossover; never reads or copies `labels/`):

@@ -76,3 +76,53 @@ def test_when_the_model_fails_the_rules_result_is_kept_and_the_fallbacks_are_rec
     assert leading(run) == leading(run_diagnosis(incident, gateway, scopes))
     assert any(d.reasoning == "rules-fallback" for d in run.diagnoses)  # evaluation counts the model as incomplete
     verify_run(run, scopes)
+
+
+def test_a_failed_llm_stage_keeps_the_rules_result_and_says_the_model_did_not_finish(adapter, gateway, scopes,
+                                                                                     monkeypatch):
+    from hpc_agent.tools.gateway import ToolNotAllowedError
+    from hpc_agent.workflows import cascade as cascade_module
+
+    real = cascade_module.run_diagnosis
+
+    def spent(*args, llm=None, **kwargs):
+        if llm is not None:
+            raise ToolNotAllowedError("tool call budget exhausted (scheduler-agent -> get_job_status)")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(cascade_module, "run_diagnosis", spent)
+    incident = adapter.load_incident("POC-SCHEDULER-001")
+    run = run_cascade(incident, gateway, FakeLLM({}), scopes)
+    assert run.cascade.escalated and run.cascade.ai_error.startswith("ToolNotAllowedError")
+    assert leading(run) == leading(run_diagnosis(incident, gateway, scopes)) and run.cascade.ai_lead is None
+    verify_run(run, scopes)
+
+
+def test_the_second_opinion_is_what_the_report_shows_second_even_when_another_agent_fell_back(tmp_path, scopes):
+    """An LLM-stage rules fallback repeats the rules' causes; they must not take the second place (acceptance-5 R2)."""
+    import json
+
+    from hpc_agent.llm.provider import LLMUnavailableError
+    from hpc_agent.tools.gateway import build_default_gateway
+    from tests.conftest import PROJECT_ROOT, make_data_root
+
+    incident = json.loads((PROJECT_ROOT / "fixtures/incidents/POC-SCHEDULER-001.json").read_text())
+    incident |= {"incident_id": "SIM-R2-001", "symptoms": [*incident["symptoms"], "GPU job on sim-gpu-node-0007"]}
+    saved = {f"scheduler/{n}": json.loads((PROJECT_ROOT / f"test_data/scheduler/POC-SCHEDULER-001/{n}.json").read_text())
+             for n in ("job_status", "node_status")}
+    saved["gpu/gpu_health"] = {"node": "sim-gpu-node-0007",
+                               "gpus": [{"index": 0, "health": "pass", "xid_events": [], "pcie_replay_count": 5000}]}
+    adapter = make_data_root(tmp_path, incident, saved)
+    triage = [answer(domains=[{"domain": "scheduler", "items": ["I1"]}, {"domain": "gpu", "items": ["I3"]}],
+                     primary="scheduler")]
+    replay = {"ref": "T1", "field": "pcie_replay_count", "value": 5000, "where": "0"}
+    llm = FakeLLM({"triage": triage, "scheduler": [LLMUnavailableError("down")],  # falls back to the rules
+                   "gpu": [calls("get_gpu_health"), answer(hypotheses=[{
+                       "cause": "PCIe replays on GPU 0", "category": "gpu.interconnect", "confidence": 0.4,
+                       "facts": [replay]}])]})
+    run = run_cascade(adapter.load_incident("SIM-R2-001"), build_default_gateway(adapter), llm, scopes)
+    shown = [(c.category, c.cause) for c in run.rca.probable_causes if c.status is HypothesisStatus.HYPOTHESIS]
+    assert len(shown) == len(set(shown))  # the fallback's repeat of the rules' lead is not ranked again
+    assert shown[0][0] == "scheduler.signal_termination" and shown[1][0] == run.cascade.ai_lead == "gpu.interconnect"
+    assert {d.reasoning for d in run.diagnoses} == {"llm", "rules", "rules-fallback"}  # the record keeps all of them
+    verify_run(run, scopes)
