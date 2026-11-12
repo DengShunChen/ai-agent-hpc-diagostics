@@ -113,6 +113,29 @@ node's job really did hit its time limit, so `scheduler.walltime` is not forbidd
   fault set. Independently designed cases (separate causal chains, messages and distractors, not shown to
   the implementer before the run) are the third tier; see [evaluation-protocol.md](evaluation-protocol.md).
 
+## Independent test 1 (Codex, eval-freeze-3 = c9b6479, 2026-11-12)
+
+Designed, generated, held and scored by Codex as the independent evaluator; the developer saw none of the cases,
+seeds or labels. Two strata, reported separately: 12 faults Codex designed by hand outside the catalog (3 mechanisms
+× 2 instances × 2 platforms), and 24 unseen catalog instances from a new seed. Rules and cascade (local
+qwen2.5:7b) on the frozen commit; no paid API. Full report: `~/hpc-eval/independent-test-1.md` (aggregates only).
+
+| Claim (fixed before the run) | Independent 12 | New catalog 24 |
+|---|---|---|
+| (a) rules' answers unchanged by the log digest | 12/12 | 24/24 |
+| Rules top-1 (category) | 0/12 | 15/23 |
+| (b) key log line quoted: rules / cascade | 6/12 / 8/12 | 20/23 / 20/23 |
+| (c) rules right → cascade wrong | 0/0 (no applicable case) | **0/15** |
+| (d) rules wrong, second opinion right | 1/12 | 2/8 |
+| Escalated / model completed | 12 / 12 | 9 / 9 |
+
+- Cascade machine time for the 21 escalated cases: about 203 minutes in total on CPU.
+- Found by this test: the PJM CSV parser lost quoted node lists (all 6 independent FX1000 cases quoted 0 lines). Fixed
+  after seeing the result (eval-candidate-10, accepted in acceptance-8); a rules rerun then quoted a key line in
+  12/12 and 20/23. That rerun is **not** an independent test; the frozen results above stand.
+- Categories only: a matching category, a quoted key line or a second opinion is not proof of mechanism or causal
+  understanding; that needs the blinded human review. No engineer time is measured here (see the drill).
+
 ## What this shows
 
 1. **The simulator and the import path work end to end.** Raw logs and command output go through the
