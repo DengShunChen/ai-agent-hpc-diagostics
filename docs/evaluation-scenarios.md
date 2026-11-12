@@ -204,10 +204,12 @@ node's job really did hit its time limit, so `scheduler.walltime` is not forbidd
   second opinion right where the rules are wrong, and key log lines quoted.
 - **Log digest for the rules (2026-11-12, after the first cascade dev run):** the rules report listed "relevant
   log excerpts" as missing and pointed at no log line, so an engineer given the report still had to grep from
-  scratch, and the LLM agents cited a key line in only 2 of 35 dev scenarios. `get_log_digest` is a fixed tool
-  (no model, no arguments): warning and error lines on the failed job's allocated nodes from job start to 5 minutes
-  after its end, matched by a fixed list of generic error terms, repeats folded, oldest first; lines on other nodes
-  in the window are only counted. The rule-based scheduler agent quotes the lines as facts and draws no hypothesis
+  scratch; qwen2.5:7b cited a key line in 2 of 13 Slurm dev scenarios when it ran every agent (Results table), 4
+  of 31 on the phase-1 hidden set, and 2 of the 19 dev cases the first cascade run handed to it. `get_log_digest` is
+  a fixed tool (no model, no arguments): warning and error lines on the failed job's allocated nodes from job start
+  to 5 minutes after its end, matched by a fixed list of generic error terms, repeats folded, oldest first; when
+  there are too many, the earliest and the latest are kept and the middle is omitted (counted); lines on other
+  nodes in the window are only counted. The rule-based scheduler agent quotes the lines as facts and draws no hypothesis
   from them. The term list and window were written before measuring, but by the developer who also wrote the fault
   catalog, so the dev result below is not independent. Dev check (rules): top-1 and classification unchanged on
   all 38 dev cases; a key line was quoted in **32 of 35** dev scenarios that have key lines (dev 11/13, FX1000

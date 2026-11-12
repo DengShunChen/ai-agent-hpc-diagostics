@@ -170,12 +170,28 @@ def _duration(value: object) -> timedelta | None:
     return timedelta(days=days, hours=hours, minutes=minutes, seconds=seconds)
 
 
+def _ends(rows: list[dict]) -> list[dict]:
+    """The earliest and the latest messages, alternately, within the row and size limits, kept in time order:
+    the first error on a node and the last ones before the job ended both matter; the middle goes first."""
+    keep, size, lo, hi, from_start = set(), 0, 0, len(rows) - 1, True
+    while lo <= hi and len(keep) < MAX_DIGEST_ROWS:
+        i = lo if from_start else hi
+        size += len(json.dumps(rows[i]))
+        if size > MAX_SHOWN_CHARS:
+            break
+        keep.add(i)
+        lo, hi = (lo + 1, hi) if from_start else (lo, hi - 1)
+        from_start = not from_start
+    return [r for i, r in enumerate(rows) if i in keep]
+
+
 def digest(adapter: ReadOnlyDataAdapter, incident_id: str) -> ToolResult:
     """Warning and error lines on the job's allocated nodes from its start to just after its end.
 
     What an engineer greps first: the job's own nodes, the job's own time, error words. Repeats of the
     same message (numbers masked) are folded into their first line with a count, oldest first, so the
-    first error on a node comes before its consequences. Lines elsewhere in the same window are only
+    first error on a node comes before its consequences. When there are too many, the earliest and the latest
+    are kept and the middle is omitted (counted). Lines elsewhere in the same window are only
     counted: they are the background an engineer has to rule out.
     """
     job_path = ("test_data", "scheduler", incident_id, "job_status.json")
@@ -216,11 +232,11 @@ def digest(adapter: ReadOnlyDataAdapter, incident_id: str) -> ToolResult:
         else:
             folded[key] = {**_where(line), "timestamp": line["timestamp"], "text": text, "repeats": 1,
                            "last_seen": line["timestamp"]}
-    rows = _cap(list(folded.values())[:MAX_DIGEST_ROWS])
+    rows = _ends(list(folded.values()))
     return ToolResult(tool="get_log_digest", status=ToolStatus.OK, source=f"test_data/logs/{incident_id}", data={
         "job_id": job_id, "nodes": nodes, "window_start": start.isoformat(),
         "window_end": (end + DIGEST_AFTER).isoformat(), "total_matches": total, "messages": len(folded),
-        "shown": len(rows), "rows": rows,
+        "shown": len(rows), "omitted": len(folded) - len(rows), "rows": rows,
         "elsewhere": {"lines": elsewhere, "nodes": len(elsewhere_nodes - {None})},
     })
 

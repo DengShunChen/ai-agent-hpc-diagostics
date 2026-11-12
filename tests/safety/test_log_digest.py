@@ -65,3 +65,21 @@ def test_the_rules_quote_the_lines_exactly_and_make_no_hypothesis_from_them(tmp_
     assert all(any(r["text"] in f for f in facts) for r in digest(adapter).data["rows"])
     causes = [c for c in run.rca.probable_causes if c.status is HypothesisStatus.HYPOTHESIS]
     assert not any("get_log_digest" in e.source for c in causes for e in c.supporting_evidence)
+
+
+def test_when_there_are_too_many_the_earliest_and_the_latest_are_kept(tmp_path, monkeypatch):
+    monkeypatch.setattr("hpc_agent.tools.log_tools.MAX_DIGEST_ROWS", 4)
+    many = [line(n, A, 2, n, f"kernel: device{chr(96 + n)} error") for n in range(1, 11)]  # 10 distinct messages
+    adapter = make_data_root(tmp_path, INCIDENT, {"scheduler/job_status": JOB,
+                                                  "logs/syslog": {"source": "syslog", "lines": many, "unparsed": 0}})
+    data = digest(adapter).data
+    assert [r["line"] for r in data["rows"]] == [1, 2, 9, 10] and data["omitted"] == 6
+
+
+def test_every_catalog_fault_can_be_answered_in_a_drill(tmp_path):
+    from hpc_agent.evaluation.drill import answer_choices
+    from hpc_agent.simulate.render import generate
+    from hpc_agent.simulate.scenario import ALL_FAULTS, stratified_scenarios
+
+    leading = {c for sc in stratified_scenarios(7, 1, ALL_FAULTS) for c in generate(sc, tmp_path).leading_categories}
+    assert leading and leading <= set(answer_choices())
