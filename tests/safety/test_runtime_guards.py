@@ -94,3 +94,15 @@ def test_injected_knowledge_is_inert(tmp_path, scopes):
     assert {c.confidence for c in run.rca.probable_causes} == {0.25}  # unchanged by the document
     assert all(e.kind is not EvidenceKind.KNOWLEDGE for e in run.rca.facts)
     assert all(not c.tool.startswith(("run", "exec", "ssh")) for c in run.tools_invoked)
+
+
+def test_reference_lookups_stop_when_the_budget_is_spent(gateway, scopes):
+    """Knowledge references are optional context: a spent budget skips them instead of failing the run."""
+    from hpc_agent.agents.evidence import gather_references
+    from hpc_agent.models import Domain
+
+    log = []
+    spent = ScopedGateway(gateway, "gpu-agent", scopes, log, CallBudget(limit=0))
+    references, checks = gather_references(spent, Domain.GPU, ["GPU fell off the bus Xid 79"])
+    assert references == [] and checks == ["knowledge lookup skipped: the run's tool call budget was exhausted"]
+    assert log == []  # no call was made past the budget

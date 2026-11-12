@@ -10,7 +10,7 @@ import re
 from datetime import datetime
 
 from hpc_agent.models import Domain, Evidence, EvidenceKind, Incident
-from hpc_agent.tools.gateway import ScopedGateway, ToolResult
+from hpc_agent.tools.gateway import ScopedGateway, ToolNotAllowedError, ToolResult
 from hpc_agent.tools.knowledge_tools import terms
 
 # Keyword signals used to relate incident text to domains. Matching is a triage aid only:
@@ -95,7 +95,12 @@ def gather_references(gateway: ScopedGateway, domain: Domain, texts: list[str]) 
     for tool, limit in REFERENCE_TOOLS:
         if tool not in gateway.allowed_tools:
             continue
-        for hit in (gateway.invoke(tool, query=query).data or [])[:limit]:
+        try:
+            hits = gateway.invoke(tool, query=query).data or []
+        except ToolNotAllowedError:  # the run's call budget is spent; references are optional context
+            checks.append("knowledge lookup skipped: the run's tool call budget was exhausted")
+            break
+        for hit in hits[:limit]:
             references.append(
                 Evidence(
                     kind=EvidenceKind.KNOWLEDGE,

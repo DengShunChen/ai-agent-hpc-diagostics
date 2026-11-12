@@ -188,6 +188,16 @@ node's job really did hit its time limit, so `scheduler.walltime` is not forbidd
   before any cascade run and were not tuned on scores; the phase-1 evaluation results were not used to shape
   them. Known limit: a rules miss with no tool-supported hypothesis (SIM-DEV-001) is treated as a refusal and
   is not handed over. On the dev sets the gate hands over 20 of 38 cases, including 5 the rules already get right.
+- **Budget crash in knowledge lookups (2026-11-12, found in the first cascade dev run with qwen2.5:7b):**
+  SIM-NOV-009 failed with `ToolNotAllowedError: tool call budget exhausted (gpu-agent -> search_sop)`: the LLM
+  agent had spent the run's shared call budget, and the knowledge lookup after its answer raised instead of
+  stopping. Knowledge references are optional context (never evidence), so a spent budget now skips them and
+  records "knowledge lookup skipped" in the checks; no call is made past the budget, and evidence tools still
+  fail closed. The same defect could hit any LLM run on `eval-freeze-1`; those results are not rerun.
+- **First cascade dev run (qwen2.5:7b, before the fix above), reported, not acted on:** 0 cases rescued, 3 cases
+  the rules had right turned wrong (SIM-DEV-004, SIM-FX-001, SIM-FX-003: a checked but wrong LLM cause leads
+  over a correct rules answer, which stays in the top 3). No change to the gate or the ordering was made from
+  this run.
 - Results on the dev sets after these changes are not an independent test of them. A blind set from the
   same catalog tests unseen instances only; independently designed cases are the stronger test
   ([evaluation-protocol.md](evaluation-protocol.md)).
