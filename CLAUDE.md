@@ -80,6 +80,6 @@ Never push to any Git remote unless explicitly instructed.
 - Consults (`workflows/diagnostic_workflow.py`): a specialist may ask another domain's agent to look, carrying only
   checked tool evidence; each agent runs at most once per run, at most MAX_CONSULTS per run
 - `src/hpc_agent/workflows/cascade.py` — rules first; the LLM agents run only when the rules lead with an outcome
-  category (`outcome_categories` in config/agents/), never over a rules refusal; only a checked LLM cause in a
-  non-outcome category may lead, and the rules' hypotheses stay right below it. Gate and ordering are fixed code
+  category (`outcome_categories` in config/agents/), never over a rules refusal; the rules' lead stays first and
+  a checked LLM cause in a non-outcome category is listed right below it. Gate and ordering are fixed code
 - `tests/{unit,safety,scenarios}/`

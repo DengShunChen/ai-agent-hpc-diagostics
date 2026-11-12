@@ -195,10 +195,13 @@ node's job really did hit its time limit, so `scheduler.walltime` is not forbidd
   stopping. Knowledge references are optional context (never evidence), so a spent budget now skips them and
   records "knowledge lookup skipped" in the checks; no call is made past the budget, and evidence tools still
   fail closed. The same defect could hit any LLM run on `eval-freeze-1`; those results are not rerun.
-- **First cascade dev run (qwen2.5:7b, before the fix above), reported, not acted on:** 0 cases rescued, 3 cases
-  the rules had right turned wrong (SIM-DEV-004, SIM-FX-001, SIM-FX-003: a checked but wrong LLM cause leads
-  over a correct rules answer, which stays in the top 3). No change to the gate or the ordering was made from
-  this run.
+- **First cascade dev run (qwen2.5:7b, before the fix above):** 0 cases rescued, 3 cases the rules had right
+  turned wrong (SIM-DEV-004, SIM-FX-001, SIM-FX-003: a checked but wrong LLM cause led over a correct rules
+  answer). **Changed after this run (2026-11-12):** the rules' lead now stays first and the LLM agents' checked
+  cause is listed right below it as a second opinion; the gate is unchanged. Cascade top-1 therefore equals the
+  rules' top-1 by construction, and what the cascade can add is measured as "rules wrong, second opinion right"
+  (reported per run). These were the claim metrics fixed before any independent test: right-to-wrong flips = 0,
+  second opinion right where the rules are wrong, and key log lines quoted.
 - **Log digest for the rules (2026-11-12, after the first cascade dev run):** the rules report listed "relevant
   log excerpts" as missing and pointed at no log line, so an engineer given the report still had to grep from
   scratch, and the LLM agents cited a key line in only 2 of 35 dev scenarios. `get_log_digest` is a fixed tool

@@ -42,15 +42,16 @@ def test_a_cause_or_a_refusal_from_the_rules_is_kept_and_no_model_runs(adapter, 
     assert leading(run) == leading(rules) and all(d.reasoning == "rules" for d in run.diagnoses)
 
 
-def test_a_checked_cause_from_the_llm_agents_leads_and_the_rules_stay_in_the_top_three(adapter, gateway, scopes):
-    llm = scheduler_llm([{"cause": "The node was drained", "category": "node.unhealthy", "confidence": 0.3,
+def test_the_rules_lead_stays_first_and_a_checked_llm_cause_comes_right_below(adapter, gateway, scopes):
+    """A wrong but checked model cause must never displace a correct rules answer (3 did in the first 7B dev run)."""
+    llm = scheduler_llm([{"cause": "The node was drained", "category": "node.unhealthy", "confidence": 0.9,
                           "facts": [DRAIN]}])
     incident = adapter.load_incident("POC-SCHEDULER-001")
     rules_lead = leading(run_diagnosis(incident, gateway, scopes))[0]
     run = run_cascade(incident, gateway, llm, scopes)
     assert run.cascade.escalated and run.cascade.rules_lead == rules_lead == "scheduler.signal_termination"
-    assert leading(run)[0] == run.cascade.ai_lead == "node.unhealthy"  # leads despite a lower confidence
-    assert rules_lead in leading(run)[:3]
+    assert leading(run)[:2] == [rules_lead, "node.unhealthy"]  # second despite a higher confidence
+    assert run.cascade.ai_lead == "node.unhealthy"
     assert {d.reasoning for d in run.diagnoses} == {"llm", "rules"}  # both runs' records are kept
     verify_run(run, scopes)  # every fact traces to a call in this record
 

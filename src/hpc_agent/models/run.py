@@ -21,7 +21,7 @@ class CascadeRecord(BaseModel):
     escalated: bool
     reason: NonEmptyStr
     rules_lead: str | None = None  # category the rules led with
-    ai_lead: str | None = None  # checked cause category the LLM agents added, when they found one
+    ai_lead: str | None = None  # the LLM agents' top checked cause category, listed right below the rules' lead
     rules_seconds: float = Field(ge=0)
     ai_seconds: float | None = Field(default=None, ge=0)
 

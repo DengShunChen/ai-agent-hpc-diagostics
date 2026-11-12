@@ -3,8 +3,10 @@
 The rule-based agents are fast and reliable on the faults they encode, and on a fault they don't encode they
 still lead with what they can see: the job hit its time limit, was killed, or exited non-zero
 (`outcome_categories` in config/agents/). Those say how the job ended, not which component caused it. Only
-then does the cascade run the LLM agents, and only a cause they ground in tool data, in a category that is not
-an outcome, may lead. The rules' hypotheses stay right below it, so a correct rules answer is never dropped.
+then does the cascade run the LLM agents, and a cause they ground in tool data, in a category that is not an
+outcome, is listed as a second opinion **right below the rules' lead**. The rules' lead stays first, so a
+correct rules answer is never displaced: in the first cascade dev run (qwen2.5:7b, 2026-11-12) letting the
+model's cause lead turned 3 correct rules answers wrong, and the engineer reviewing the report decides.
 
 Never escalated: a rules run with no tool-supported hypothesis (the rules report missing evidence, and the
 LLM agents must not turn a correct refusal into an answer), or one that already names a cause.
@@ -80,19 +82,27 @@ def run_cascade(
     ai_causes = [c for d in ai.diagnoses if d.reasoning == "llm" for c in d.hypotheses
                  if c.category not in outcomes and _supported(c)]
     ai_categories = {c.category for c in ai_causes}
+    rules_lead_cause = next((c.cause for c in rules.rca.probable_causes if c.status is HypothesisStatus.HYPOTHESIS), None)
     rules_causes = {(c.category, c.cause) for d in rules.diagnoses for c in d.possible_causes}
     diagnoses = [*ai.diagnoses, *rules.diagnoses]  # both runs, each agent's diagnosis once per run
 
+    def rank(c: ProbableCause) -> int:
+        # The rules' lead first, the LLM agents' checked causes right below it, then the rest.
+        if (c.category, c.cause) == (rules_lead, rules_lead_cause):
+            return 0
+        if c.category in ai_categories and (c.category, c.cause) not in rules_causes:
+            return 1
+        return 2
+
     if ai_causes:
         rca = RCACoordinator(timedelta(minutes=profile.correlation_window_minutes)).correlate(
-            incident, ai.triage, diagnoses, ai.unavailable_agents,
-            rank=lambda c: 0 if c.category in ai_categories else 1 if (c.category, c.cause) in rules_causes else 2)
+            incident, ai.triage, diagnoses, ai.unavailable_agents, rank=rank)
         actions, plan = RemediationAgent(profile).plan(rca, diagnoses)
         merged: list[RecommendedAction] = list(rca.recommended_actions)
         merged += [a for a in actions if all(a.action != m.action for m in merged)]
         rca = rca.model_copy(update={"recommended_actions": merged})
-        open_lead = next(c for c in rca.probable_causes if c.status is HypothesisStatus.HYPOTHESIS)
-        record = CascadeRecord(escalated=True, reason=reason, rules_lead=rules_lead, ai_lead=open_lead.category,
+        second = max(ai_causes, key=lambda c: c.confidence)
+        record = CascadeRecord(escalated=True, reason=reason, rules_lead=rules_lead, ai_lead=second.category,
                                rules_seconds=rules_seconds, ai_seconds=ai_seconds)
     else:
         rca, plan = rules.rca, rules.remediation

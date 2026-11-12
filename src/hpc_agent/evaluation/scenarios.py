@@ -70,6 +70,7 @@ class LogResult(BaseModel):
     # lead correct (so a report can count right->wrong and wrong->right against the rules alone).
     escalated: bool | None = None
     rules_top1: bool | None = None
+    ai_top1: bool | None = None  # cascade: the LLM agents' second opinion matches the label (None: no checked cause)
     rules_seconds: float | None = None
     ai_seconds: float | None = None
 
@@ -283,6 +284,8 @@ def evaluate_scenarios(
                                       escalated=c.escalated if c else None,
                                       rules_top1=(c.rules_lead in label.leading_categories
                                                   if label.leading_categories else None) if c else None,
+                                      ai_top1=(c.ai_lead in label.leading_categories
+                                               if c.ai_lead and label.leading_categories else None) if c else None,
                                       rules_seconds=c.rules_seconds if c else None,
                                       ai_seconds=c.ai_seconds if c else None,
                                       key_lines_cited=len(wanted & cited),
@@ -378,6 +381,7 @@ def _cascade_section(rows: list[LogResult], by_id: dict, planned: int) -> list[s
     """Escalation rate, time per path, and the cascade against the rules alone on the same cases."""
     escalated = [r for r in rows if r.escalated]
     pairs = [(r.rules_top1, by_id[r.case_id].leading_correct) for r in rows if r.rules_top1 is not None]
+    second = [r for r in escalated if r.rules_top1 is not None]
 
     def median(values: list[float]) -> str:
         values = sorted(values)
@@ -388,11 +392,21 @@ def _cascade_section(rows: list[LogResult], by_id: dict, planned: int) -> list[s
             "failed cases have no cascade record). Median time: rules "
             f"{median([r.rules_seconds for r in rows if r.rules_seconds is not None])}, LLM agents on escalated cases "
             f"{median([r.ai_seconds for r in escalated if r.ai_seconds is not None])}.", "",
-            "Category top-1 against the rules alone on the same cases (the rules' lead is recorded in every cascade run):",
+            "Category top-1 against the rules alone on the same cases (the rules' lead stays first, so a right-to-wrong "
+            "flip is a defect):",
             "", "| Rules right, cascade right | Rules wrong, cascade right | Rules right, cascade **wrong** "
             "| Both wrong |", "|---|---|---|---|",
             f"| {sum(a and b for a, b in pairs)} | {sum(not a and b for a, b in pairs)} "
-            f"| {sum(a and not b for a, b in pairs)} | {sum(not a and not b for a, b in pairs)} |"]
+            f"| {sum(a and not b for a, b in pairs)} | {sum(not a and not b for a, b in pairs)} |", "",
+            "The LLM agents' second opinion (their top checked cause, listed right below the rules' lead) on the "
+            "escalated cases with a labelled category:", "",
+            "| Rules wrong, **second opinion right** | Rules wrong, second opinion wrong | Rules right, second opinion "
+            "right | Rules right, second opinion wrong | No checked cause |", "|---|---|---|---|---|",
+            f"| {sum(r.rules_top1 is False and r.ai_top1 is True for r in second)} "
+            f"| {sum(r.rules_top1 is False and r.ai_top1 is False for r in second)} "
+            f"| {sum(r.rules_top1 is True and r.ai_top1 is True for r in second)} "
+            f"| {sum(r.rules_top1 is True and r.ai_top1 is False for r in second)} "
+            f"| {sum(r.ai_top1 is None for r in second)} |"]
 
 
 def render_log_section(logs: list[LogResult], results: list | None = None) -> str:
