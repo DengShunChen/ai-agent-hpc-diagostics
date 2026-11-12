@@ -95,6 +95,16 @@ def _parser() -> argparse.ArgumentParser:
     pilot = sub.add_parser("compare-pilot", help="compare baseline vs assisted pilot periods")
     pilot.add_argument("csv", type=Path)
     pilot.add_argument("--min-n", type=int, default=10)
+    drill = sub.add_parser("drill-prepare", help="write crossover drill packets from a simulated set (never its labels)")
+    drill.add_argument("scenarios", type=Path, help="a directory written by `hpc-agent simulate`")
+    drill.add_argument("--output", type=Path, required=True, help="new directory outside the repository")
+    drill.add_argument("--engineers", required=True, help="comma-separated engineer codes (codes, not names)")
+    drill.add_argument("--reasoning", choices=("rules", "cascade"), default="rules",
+                       help="what the assisted arm's report comes from; cascade needs MODEL_PROVIDER")
+    dscore = sub.add_parser("drill-score", help="score filled-in drill sheets against the labels")
+    dscore.add_argument("sheets", type=Path, nargs="+")
+    dscore.add_argument("--labels", type=Path, required=True, help="the simulated set's labels/ directory")
+    dscore.add_argument("--output", type=Path, required=True)
     imp = sub.add_parser("import-export", help="import a site's exported CSV files into a separate data root")
     imp.add_argument("export_dir", type=Path)
     imp.add_argument("--output", type=Path, required=True, help="new data root, outside the repository")
@@ -164,6 +174,39 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         incidents, problems = pilot_analysis.load(args.csv)
         print(pilot_analysis.render(pilot_analysis.analyse(incidents, args.min_n), problems))
+        return 0
+
+    if args.command == "drill-prepare":
+        from hpc_agent.evaluation.drill import DrillError, prepare
+        from hpc_agent.llm.provider import LLMConfigError, provider_from_env
+
+        if args.output.resolve().is_relative_to(adapter.root.resolve()):
+            print("error: --output must be outside the repository (drill packets are not committed)", file=sys.stderr)
+            return 2
+        llm = None
+        if args.reasoning == "cascade":
+            try:
+                llm = provider_from_env()
+            except LLMConfigError as error:
+                print(f"error: {error}", file=sys.stderr)
+                return 2
+        try:
+            done = prepare(args.scenarios, args.output, [c.strip() for c in args.engineers.split(",") if c.strip()],
+                           llm=llm, cascade=args.reasoning == "cascade")
+        except DrillError as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 2
+        print(f"{done['scenarios']} scenarios, {done['engineers']} engineers: packets in {args.output / 'packets'}, "
+              f"assignment in {args.output / 'assignment.csv'}" + (f"; import rejected {done['rejected']}"
+                                                                    if done["rejected"] else ""))
+        return 0
+
+    if args.command == "drill-score":
+        from hpc_agent.evaluation.drill import score as score_drill
+
+        _, text = score_drill(args.sheets, args.labels, args.output)
+        (args.output / "drill-summary.md").write_text(text, encoding="utf-8")
+        print(text)
         return 0
 
     if args.command == "import-export":

@@ -82,4 +82,6 @@ Never push to any Git remote unless explicitly instructed.
 - `src/hpc_agent/workflows/cascade.py` — rules first; the LLM agents run only when the rules lead with an outcome
   category (`outcome_categories` in config/agents/), never over a rules refusal; the rules' lead stays first and
   a checked LLM cause in a non-outcome category is listed right below it. Gate and ordering are fixed code
+- `src/hpc_agent/evaluation/drill.py` — drill kit (`drill-prepare`, `drill-score`): crossover packets from a simulated set;
+  never read or copy its labels/ into a packet; report time together with correctness, never as MTTR
 - `tests/{unit,safety,scenarios}/`
