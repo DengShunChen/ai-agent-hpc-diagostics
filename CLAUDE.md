@@ -75,6 +75,8 @@ Never push to any Git remote unless explicitly instructed.
 - `src/hpc_agent/ingest/raw_export.py` + `tools/log_tools.py` — raw logs parsed into a de-identified log index;
   `get_log_lines` takes only a fixed source and plain keywords; log facts must quote the line exactly.
   `analyze_logs` runs a fixed set of analyses; the model picks an operation and keywords, never an expression
+  `get_log_digest` lists warning/error lines on the failed job's nodes while it ran (fixed terms, no arguments); the
+  rule-based scheduler agent quotes them as facts but draws no hypothesis from them
 - Consults (`workflows/diagnostic_workflow.py`): a specialist may ask another domain's agent to look, carrying only
   checked tool evidence; each agent runs at most once per run, at most MAX_CONSULTS per run
 - `src/hpc_agent/workflows/cascade.py` — rules first; the LLM agents run only when the rules lead with an outcome

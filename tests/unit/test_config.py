@@ -8,7 +8,7 @@ def test_repo_scopes(scopes):
     knowledge = {"search_sop", "search_incident_history", "search_manual", "load_skill"}
     knowledge |= {"get_log_lines", "analyze_logs"}  # every specialist may search and analyse saved logs (read-only)
     assert scopes["storage-agent"] == {"get_filesystem_usage", "get_ost_usage"} | knowledge
-    assert scopes["scheduler-agent"] == {"get_job_status", "get_node_status"} | knowledge
+    assert scopes["scheduler-agent"] == {"get_job_status", "get_node_status", "get_log_digest"} | knowledge
     assert scopes["network-agent"] == {"get_network_status"} | knowledge
     assert scopes["gpu-agent"] == {"get_gpu_health"} | knowledge
     assert scopes["rca-coordinator"] == frozenset()

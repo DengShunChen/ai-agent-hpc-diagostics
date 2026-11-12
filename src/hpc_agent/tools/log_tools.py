@@ -1,6 +1,7 @@
 """Log tools over the incident's saved, de-identified log index (read-only, saved data only).
 
 get_log_lines: search one log source for lines containing all keywords.
+get_log_digest: the warning and error lines on the failed job's own nodes while it ran (fixed terms, no model).
 analyze_logs: a fixed set of analyses across all saved log sources. The model chooses an operation
 and plain keywords; this module runs it. No expressions, no code, no paths: the model composes an
 analysis, it never writes one that runs.
@@ -14,6 +15,7 @@ and the total count tells it to narrow the search.
 from __future__ import annotations
 
 import json
+import re
 from collections import defaultdict
 from datetime import datetime, timedelta
 
@@ -148,6 +150,81 @@ def analyze(adapter: ReadOnlyDataAdapter, incident_id: str, operation: str, keyw
     })
 
 
+# Words that mark a warning or error line in syslog (kernel, drivers, filesystem clients) and job manager logs.
+# Fixed and generic, written before the digest was measured on any scenario; never extended to fit one fault.
+DIGEST_TERMS = ("error", "fail", "timeout", "timed out", "down", "lost", "xid", "oom", "out of memory", "killed",
+                "panic", "ecc", "segfault", "abort", "fatal", "critical", "reset", "unreachable", "evict",
+                "throttl", "denied", "no space", "i/o", "hung", "not responding")
+DIGEST_AFTER = timedelta(minutes=5)  # effects logged just after the job ended
+DIGEST_DEFAULT_SPAN = timedelta(hours=2)  # before the job's end, when its start time is unknown
+MAX_DIGEST_ROWS = 20
+_DURATION = re.compile(r"(?:(\d+)-)?(\d+):(\d{2}):(\d{2})")
+_VARIABLE = re.compile(r"0x[0-9a-f]+|\d+")
+
+
+def _duration(value: object) -> timedelta | None:
+    match = _DURATION.fullmatch(value) if isinstance(value, str) else None
+    if not match:
+        return None
+    days, hours, minutes, seconds = (int(g or 0) for g in match.groups())
+    return timedelta(days=days, hours=hours, minutes=minutes, seconds=seconds)
+
+
+def digest(adapter: ReadOnlyDataAdapter, incident_id: str) -> ToolResult:
+    """Warning and error lines on the job's allocated nodes from its start to just after its end.
+
+    What an engineer greps first: the job's own nodes, the job's own time, error words. Repeats of the
+    same message (numbers masked) are folded into their first line with a count, oldest first, so the
+    first error on a node comes before its consequences. Lines elsewhere in the same window are only
+    counted: they are the background an engineer has to rule out.
+    """
+    job_path = ("test_data", "scheduler", incident_id, "job_status.json")
+    if not adapter.exists(*job_path):
+        return ToolResult(tool="get_log_digest", status=ToolStatus.NO_DATA)
+    job = adapter.read_json(*job_path)
+    nodes = [n for n in job.get("allocated_nodes") or [] if isinstance(n, str)]
+    end = _when({"timestamp": job.get("end_time")})
+    if end is None or not nodes:
+        return ToolResult(tool="get_log_digest", status=ToolStatus.NO_DATA)
+    elapsed = _duration(job.get("elapsed"))
+    start = end - (elapsed if elapsed is not None else DIGEST_DEFAULT_SPAN)
+    job_id = job.get("job_id") if isinstance(job.get("job_id"), str) else None
+    wanted = set(nodes)
+
+    def on_job(line: dict) -> bool:
+        if line.get("node"):
+            return line["node"] in wanted
+        text = line.get("text", "")  # job manager lines carry no node: keep those that name the job or its nodes
+        return bool(job_id and job_id in text) or any(n in text for n in nodes)
+
+    folded: dict[tuple[str, str], dict] = {}
+    elsewhere, elsewhere_nodes, total = 0, set(), 0
+    for line in _all_lines(adapter, incident_id):
+        when = _when(line)
+        text = line.get("text", "")
+        if not (start <= when <= end + DIGEST_AFTER) or not any(t in text.lower() for t in DIGEST_TERMS):
+            continue
+        if not on_job(line):
+            elsewhere += 1
+            elsewhere_nodes.add(line.get("node"))
+            continue
+        total += 1
+        key = (line.get("node") or line["log"], _VARIABLE.sub("#", text.lower()))
+        if key in folded:
+            folded[key]["repeats"] += 1
+            folded[key]["last_seen"] = line["timestamp"]
+        else:
+            folded[key] = {**_where(line), "timestamp": line["timestamp"], "text": text, "repeats": 1,
+                           "last_seen": line["timestamp"]}
+    rows = _cap(list(folded.values())[:MAX_DIGEST_ROWS])
+    return ToolResult(tool="get_log_digest", status=ToolStatus.OK, source=f"test_data/logs/{incident_id}", data={
+        "job_id": job_id, "nodes": nodes, "window_start": start.isoformat(),
+        "window_end": (end + DIGEST_AFTER).isoformat(), "total_matches": total, "messages": len(folded),
+        "shown": len(rows), "rows": rows,
+        "elsewhere": {"lines": elsewhere, "nodes": len(elsewhere_nodes - {None})},
+    })
+
+
 def tool_specs(adapter: ReadOnlyDataAdapter) -> list[ToolSpec]:
     return [ToolSpec(
         name="analyze_logs",
@@ -158,6 +235,14 @@ def tool_specs(adapter: ReadOnlyDataAdapter) -> list[ToolSpec]:
         parameters=frozenset({"incident_id", "operation", "keywords", "also_keywords", "window_seconds"}),
         handler=lambda incident_id, operation, keywords, also_keywords, window_seconds: analyze(
             adapter, incident_id, operation, keywords, also_keywords, window_seconds),
+    ), ToolSpec(
+        name="get_log_digest",
+        description=("Warning and error lines on the failed job's own nodes from its start to 5 minutes after its "
+                     "end (fixed error terms, repeats folded, oldest first), and how many such lines other nodes "
+                     "logged in the same window"),
+        operation=Operation.READ_TEST_DATA,
+        parameters=frozenset({"incident_id"}),
+        handler=lambda incident_id: digest(adapter, incident_id),
     ), ToolSpec(
         name="get_log_lines",
         description="Saved log lines of this incident that contain all the keywords (source: slurmctld, slurmd, pjm, syslog)",

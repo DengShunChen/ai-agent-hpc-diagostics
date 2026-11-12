@@ -7,6 +7,7 @@ application, the node and other domains.
 
 from __future__ import annotations
 
+import json
 import re
 
 from hpc_agent.agents.evidence import dedupe, gather_references, incident_evidence, timestamp, tool_evidence
@@ -172,6 +173,9 @@ class SchedulerAgent:
                     )
                     checks.append(f"review node health checks and system logs for {name} around the failure time")
 
+        if data is not None and "get_log_digest" in gateway.allowed_tools:
+            evidence += self._log_digest(incident, gateway, checks)
+
         if abnormal:
             missing.append("node memory / out-of-memory events at the failure time")
             missing.append("storage, network and GPU state on the job's nodes at the failure time")
@@ -193,6 +197,28 @@ class SchedulerAgent:
             references=references,
             confidence=max((c.confidence for c in open_causes), default=0.0),
         )
+
+    @staticmethod
+    def _log_digest(incident: Incident, gateway: ScopedGateway, checks: list[str]) -> list[Evidence]:
+        """The warning and error lines on the job's nodes while it ran, quoted exactly as facts.
+
+        They are observations for the reviewer, not a diagnosis: no hypothesis is made from them here.
+        """
+        result = gateway.invoke("get_log_digest", incident_id=incident.incident_id)
+        if result.status is not ToolStatus.OK or not isinstance(result.data, dict):
+            return []
+        rows = result.data.get("rows") or []
+        out = []
+        for row in rows:
+            where = f"log={row['log']}, " + (f"node={row['node']}, " if row.get("node") else "") + f"line={row['line']}"
+            repeats = f" (logged {row['repeats']} times until {row['last_seen']})" if row.get("repeats", 1) > 1 else ""
+            out.append(tool_evidence(result, f"{where}: text={json.dumps(row['text'])}{repeats}", timestamp(row["timestamp"])))
+        if rows:
+            other = result.data.get("elsewhere") or {}
+            checks.append(f"start from the first warning and error lines on the job's nodes (facts quoting log lines); "
+                          f"{other.get('lines', 0)} similar line(s) on {other.get('nodes', 0)} other node(s) in the same "
+                          "window are background to rule out")
+        return out
 
     @staticmethod
     def _finding(

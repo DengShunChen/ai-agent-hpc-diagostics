@@ -400,7 +400,8 @@ def render_log_section(logs: list[LogResult], results: list | None = None) -> st
     cited = sum(r.key_lines_cited > 0 for r in keyed)
     lines = ["## Log evidence (simulated scenarios)", "",
              f"Scenarios where an agent cited at least one injected key log line: **{cited} of {len(keyed)}**. "
-             "Rule-based agents never search logs (by design in this version), so in a rules run this is 0.", "",
+             "Rule-based agents never search logs; the scheduler agent quotes the warning and error lines on the job's nodes "
+             "while it ran (`get_log_digest`, fixed terms), and those quotes count here. No hypothesis is made from them.", "",
              "| Scenario | Fault | Log lines | Key lines | Key lines cited | Log searches | Log analyses | Consulted agents "
              "| Faulty component named | Error |",
              "|---|---|---|---|---|---|---|---|---|---|"]

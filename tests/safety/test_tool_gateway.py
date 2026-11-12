@@ -19,6 +19,7 @@ EXPECTED_TOOLS = (
     "get_filesystem_usage",
     "get_gpu_health",
     "get_job_status",
+    "get_log_digest",  # error lines on the failed job's nodes while it ran; fixed terms, read-only, no arguments
     "get_log_lines",  # searches an incident's saved, de-identified log index; read-only
     "get_network_status",
     "get_node_status",

@@ -317,7 +317,7 @@ def logs_missing(w: World) -> dict:
 
 # --- novel faults: chosen because the rule-based agents do not encode them -----------------------
 # They test generalization, not accuracy. EVIDENCE says where each fault's evidence is, so results
-# can be reported per kind: a rules miss on a logs-only fault is a design limit (rules never read logs).
+# can be reported per kind: a rules miss on a logs-only fault is a design limit (rules draw no hypothesis from logs).
 
 def slow_node_walltime(w: World) -> dict:
     """One node runs throttled from the start; the tightly coupled job crawls and hits its time limit."""

@@ -139,8 +139,9 @@ node's job really did hit its time limit, so `scheduler.walltime` is not forbidd
   data adapter and the 6,000-line log index. A real day on 3,840 nodes is orders of magnitude larger.
 - **Limited command coverage.** `dcgmi` health is exported for the job's GPU node only; host names that
   appear only inside free log text are not pseudonymized (all names are `sim-` here).
-- **Rule-based agents do not read logs** in this version, by design, so the log-evidence column only
-  measures the LLM agents.
+- **Rule-based agents draw no hypothesis from logs.** Until 2026-11-12 they did not read logs at all, so the
+  log-evidence column of earlier runs only measures the LLM agents. Since then the scheduler agent quotes the
+  log digest (see Disclosure); a quoted key line counts as cited, but the rules' hypotheses do not change.
 - **Small samples.** 13-14 scenarios per set; one scenario is 7-8 percentage points.
 
 ## Disclosure: changes made during this work
@@ -198,6 +199,18 @@ node's job really did hit its time limit, so `scheduler.walltime` is not forbidd
   the rules had right turned wrong (SIM-DEV-004, SIM-FX-001, SIM-FX-003: a checked but wrong LLM cause leads
   over a correct rules answer, which stays in the top 3). No change to the gate or the ordering was made from
   this run.
+- **Log digest for the rules (2026-11-12, after the first cascade dev run):** the rules report listed "relevant
+  log excerpts" as missing and pointed at no log line, so an engineer given the report still had to grep from
+  scratch, and the LLM agents cited a key line in only 2 of 35 dev scenarios. `get_log_digest` is a fixed tool
+  (no model, no arguments): warning and error lines on the failed job's allocated nodes from job start to 5 minutes
+  after its end, matched by a fixed list of generic error terms, repeats folded, oldest first; lines on other nodes
+  in the window are only counted. The rule-based scheduler agent quotes the lines as facts and draws no hypothesis
+  from them. The term list and window were written before measuring, but by the developer who also wrote the fault
+  catalog, so the dev result below is not independent. Dev check (rules): top-1 and classification unchanged on
+  all 38 dev cases; a key line was quoted in **32 of 35** dev scenarios that have key lines (dev 11/13, FX1000
+  11/12, novel 10/10; misses: SIM-DEV-003 walltime, SIM-DEV-004 and SIM-FX-004 admin cancel, whose key lines carry
+  no error term). Digests hold 0-6 lines on these ~2,000-line logs; real logs are far
+  larger, and digest size there is unmeasured.
 - Results on the dev sets after these changes are not an independent test of them. A blind set from the
   same catalog tests unseen instances only; independently designed cases are the stronger test
   ([evaluation-protocol.md](evaluation-protocol.md)).

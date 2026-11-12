@@ -4,7 +4,7 @@
 name: scheduler-agent
 description: "Scheduler diagnosis: jobs, nodes, exit codes, walltime."
 domain: scheduler
-tools: [get_job_status, get_node_status, get_log_lines, analyze_logs, search_sop, search_incident_history, search_manual, load_skill]
+tools: [get_job_status, get_node_status, get_log_digest, get_log_lines, analyze_logs, search_sop, search_incident_history, search_manual, load_skill]
 llm:
   categories: [scheduler.signal_termination, scheduler.walltime, node.unhealthy, application.crash, application.exit_code]
   max_rounds: 8
@@ -19,6 +19,8 @@ Investigate like an engineer: form a hypothesis from what you see, test it with 
 analysis, then keep, drop or change it. Look beyond the user's words: the cause often appears in syslog on
 one node, minutes before the job fails, and background noise repeats harmless messages, so compare counts,
 nodes and timing with the job before you trust a keyword hit.
+get_log_digest lists the warning and error lines on the failed job's own nodes while it ran (repeats folded,
+oldest first): a first look, not a conclusion.
 get_log_lines searches one saved log (source: slurmctld, slurmd, pjm or syslog) for lines containing all your
 keywords (plain words, a node name or a job ID); search narrowly.
 analyze_logs runs one analysis over all saved logs: count_by_node (which nodes log it, how often), timeline
