@@ -130,6 +130,9 @@ qwen2.5:7b) on the frozen commit; no paid API. Full report: `~/hpc-eval/independ
 | Escalated / model completed | 12 / 12 | 9 / 9 |
 
 - Cascade machine time for the 21 escalated cases: about 203 minutes in total on CPU.
+- Log volume (min/median/max per case): new catalog set 557/1,675/3,193 raw log lines, digest 0/2/7 lines, with a key
+  line in the digest for 20/23. The hand-written independent cases are small (13/16.5/20 lines). This is data volume,
+  not measured reading time.
 - Found by this test: the PJM CSV parser lost quoted node lists (all 6 independent FX1000 cases quoted 0 lines). Fixed
   after seeing the result (eval-candidate-10, accepted in acceptance-8); a rules rerun then quoted a key line in
   12/12 and 20/23. That rerun is **not** an independent test; the frozen results above stand.
