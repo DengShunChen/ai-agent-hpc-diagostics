@@ -18,6 +18,13 @@ incidents per period per category, which at that rate takes many months. A drill
 controlled measurement; replaying past tickets (de-identified, through `import-export`) is the
 step after it, and the live pilot remains the only evidence about MTTR.
 
+## Decided before the first drill set was generated (2026-11-12)
+
+- The assisted arm's report comes from `drill-prepare --reasoning cascade` with the local qwen2.5:7b: the rules
+  first (with the log digest), the LLM agents' second opinion only where the rules lead with an outcome. The drill
+  measures the system the award entry describes. Not changed after seeing any drill data.
+- Scored as: median minutes per arm and share of correct answers per arm, reported together.
+
 ## Steps (facilitator)
 
 The facilitator is **not** the developer of the agents: the developer must not see the blind set's labels or
