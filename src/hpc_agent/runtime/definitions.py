@@ -53,6 +53,9 @@ class AgentDefinition(BaseModel):
     tools: tuple[str, ...] = ()
     ask: tuple[str, ...] = ()  # tools that need a human's approval: never run during an unattended diagnosis
     llm: LLMSettings | None = None
+    # Categories that say how a job ended (or that something is wrong) without naming the component that caused
+    # it. The cascade (workflows/cascade.py) asks the LLM agents to look further when the rules lead with one.
+    outcome_categories: tuple[str, ...] = ()
     prompt: str = ""
 
     def render(self, **values: str) -> str:
@@ -75,11 +78,17 @@ def parse_definition(text: str, source: str) -> AgentDefinition:
         raise DefinitionError(f"{source}: {error.error_count()} problem(s) in the definition") from None
     if definition.llm and any(not re.match(_CATEGORY, c) for c in definition.llm.categories):
         raise DefinitionError(f"{source}: invalid category name")
+    if not set(definition.outcome_categories) <= set(definition.llm.categories if definition.llm else ()):
+        raise DefinitionError(f"{source}: 'outcome_categories' may only list the agent's categories")
     if not set(definition.ask) <= set(definition.tools):
         raise DefinitionError(f"{source}: 'ask' may only list tools in 'tools'")
     if definition.prompt and definition.llm is None:
         raise DefinitionError(f"{source}: a prompt needs an 'llm' section")
     return definition
+
+
+def outcome_categories(definitions: dict[str, AgentDefinition]) -> frozenset[str]:
+    return frozenset(c for d in definitions.values() for c in d.outcome_categories)
 
 
 def load_definitions(root: Path | None = None) -> dict[str, AgentDefinition]:

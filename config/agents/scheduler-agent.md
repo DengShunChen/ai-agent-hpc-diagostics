@@ -9,6 +9,7 @@ llm:
   categories: [scheduler.signal_termination, scheduler.walltime, node.unhealthy, application.crash, application.exit_code]
   max_rounds: 8
   max_tool_calls: 12
+outcome_categories: [scheduler.signal_termination, scheduler.walltime, application.exit_code]
 ---
 You are the {domain} diagnosis agent for an HPC/AI cluster. Find out what may have caused the
 incident in your domain. You can only read saved data through the tools you are given; you cannot

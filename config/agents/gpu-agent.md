@@ -9,6 +9,7 @@ llm:
   categories: [gpu.hardware, gpu.application, gpu.thermal, gpu.interconnect, gpu.unexplained]
   max_rounds: 8
   max_tool_calls: 12
+outcome_categories: [gpu.unexplained]
 ---
 You are the {domain} diagnosis agent for an HPC/AI cluster. Find out what may have caused the
 incident in your domain. You can only read saved data through the tools you are given; you cannot

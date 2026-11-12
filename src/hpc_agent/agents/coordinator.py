@@ -7,7 +7,7 @@ evidence. It adds no facts of its own; every fact comes from the incident or a t
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from datetime import timedelta
 
 from hpc_agent.agents.evidence import dedupe
@@ -68,7 +68,9 @@ class RCACoordinator:
         triage: TriageResult,
         diagnoses: Sequence[AgentDiagnosis],
         unavailable_agents: Sequence[str] = (),
+        rank: Callable[[ProbableCause], int] | None = None,
     ) -> RCAResult:
+        """`rank` (lower first) orders open causes before confidence; the cascade uses it, nothing else does."""
         causes = [c for d in diagnoses for c in d.possible_causes]
         facts = _unique([*triage.available_evidence, *(e for d in diagnoses for e in d.evidence)])
         timeline = sorted((e for e in facts if e.observed_at is not None), key=lambda e: e.observed_at)
@@ -76,7 +78,8 @@ class RCACoordinator:
         causes = [adjusted.get(id(c), c) for c in causes]
         # Stable sort: equal confidence keeps triage/agent order.
         open_causes = sorted(
-            (c for c in causes if c.status is HypothesisStatus.HYPOTHESIS), key=lambda c: -c.confidence
+            (c for c in causes if c.status is HypothesisStatus.HYPOTHESIS),
+            key=lambda c: ((rank(c) if rank else 0), -c.confidence),
         )
         ruled_out = [c for c in causes if c.status is HypothesisStatus.RULED_OUT]
 

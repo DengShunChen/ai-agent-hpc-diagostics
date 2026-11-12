@@ -13,6 +13,19 @@ from hpc_agent.models.incident import IncidentId, NonEmptyStr
 from hpc_agent.models.triage import TriageResult
 
 
+class CascadeRecord(BaseModel):
+    """How a cascade run went: the rules ran first; the LLM agents only when the rules led with an outcome."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    escalated: bool
+    reason: NonEmptyStr
+    rules_lead: str | None = None  # category the rules led with
+    ai_lead: str | None = None  # checked cause category the LLM agents added, when they found one
+    rules_seconds: float = Field(ge=0)
+    ai_seconds: float | None = Field(default=None, ge=0)
+
+
 class DiagnosticRun(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -32,6 +45,7 @@ class DiagnosticRun(BaseModel):
     # Site whose profile was used, and when the incident was reported (for workflow metrics).
     site: NonEmptyStr = "default"
     incident_reported_at: datetime | None = None
+    cascade: CascadeRecord | None = None  # set only by workflows/cascade.py
     human_approval_required: Literal[True] = True
 
     @property

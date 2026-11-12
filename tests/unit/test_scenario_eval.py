@@ -253,3 +253,20 @@ def test_a_fallback_in_the_trace_counts_even_if_the_run_record_misses_it(tmp_pat
     [log] = logs
     assert log.model_complete is False
     assert "network-agent: fell back in the trace but not in the run record" in log.fallbacks
+
+
+def test_a_cascade_run_records_escalation_and_compares_with_the_rules_alone(tmp_path):
+    directory = make(tmp_path, faults=("segfault", "walltime"))
+    results, summary, logs = evaluate_scenarios(directory, llm=DownLLM(), cascade=True)
+    by_fault = {r.fault: r for r in logs}
+    kept, handed = by_fault["segfault"], by_fault["walltime"]
+    assert kept.escalated is False and kept.model_complete is None and kept.ai_seconds is None  # no model ran
+    assert handed.escalated is True and handed.model_complete is False and handed.fallbacks  # model down: recorded
+    assert all(r.rules_top1 is not None and r.rules_seconds is not None for r in logs)
+    section = render_log_section(logs, results)
+    assert "Escalated to the LLM agents: **1 of 2**" in section and "Rules right, cascade **wrong**" in section
+
+
+def test_a_cascade_needs_a_model(tmp_path):
+    with pytest.raises(BatchInvalid, match="cascade"):
+        evaluate_scenarios(make(tmp_path, faults=("segfault",)), cascade=True)

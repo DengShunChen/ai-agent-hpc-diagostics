@@ -24,7 +24,7 @@
     hpc-agent import-export DIR --output DATA_ROOT [--adapter csv|raw] [--dry-run]   validate + de-identify an export
     hpc-agent simulate (--scenarios DIR | --blind-seed N (--count K | --per-fault N) [--faults known|novel|all]
                        [--platform slurm-x86|tcs-fx1000|both]) --output DIR   simulated logs
-    hpc-agent evaluate --scenarios DIR [--reasoning llm]   score simulated scenarios (DIR from simulate)
+    hpc-agent evaluate --scenarios DIR [--reasoning llm|cascade]   score simulated scenarios (DIR from simulate)
 
 Decisions are recorded only; nothing is ever executed. On the CLI, --operator is an asserted
 identity; the HTTP API instead derives the operator from an authenticated bearer token.
@@ -132,8 +132,10 @@ def _parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--json", type=Path, default=None, help="write per-case results as JSON here")
     evaluate.add_argument("--runs-dir", type=Path, default=None,
                           help="scenarios: keep each case's DiagnosticRun and trace, and a manifest.json, here")
-    evaluate.add_argument("--reasoning", choices=("rules", "llm"), default="rules",
-                          help="llm: diagnose with the LLM-driven agents (needs MODEL_PROVIDER; slow on CPU)")
+    evaluate.add_argument("--reasoning", choices=("rules", "llm", "cascade"), default="rules",
+                          help="llm: diagnose with the LLM-driven agents (needs MODEL_PROVIDER; slow on CPU); "
+                               "cascade: rules first, LLM agents only where the rules lead with an outcome "
+                               "(scenarios only)")
     return parser
 
 
@@ -236,14 +238,17 @@ def main(argv: list[str] | None = None) -> int:
         from hpc_agent.llm.provider import LLMConfigError, provider_from_env
 
         llm = None
-        if args.reasoning == "llm":
+        if args.reasoning == "cascade" and not args.scenarios:
+            print("error: --reasoning cascade needs --scenarios", file=sys.stderr)
+            return 2
+        if args.reasoning in ("llm", "cascade"):
             try:
                 llm = provider_from_env()
             except LLMConfigError as error:
                 print(f"error: {error}", file=sys.stderr)
                 return 2
             if llm is None:
-                print("error: --reasoning llm needs MODEL_PROVIDER=ollama and MODEL_NAME", file=sys.stderr)
+                print(f"error: --reasoning {args.reasoning} needs MODEL_PROVIDER and MODEL_NAME", file=sys.stderr)
                 return 2
         log_section, logs = "", []
         if args.scenarios:
@@ -251,10 +256,11 @@ def main(argv: list[str] | None = None) -> int:
 
             from hpc_agent.evaluation.scenarios import manifest
 
-            run_manifest = manifest(args.scenarios, llm)
+            cascade = args.reasoning == "cascade"
+            run_manifest = manifest(args.scenarios, llm, cascade)
             try:
                 results, summary, logs = evaluate_scenarios(args.scenarios, llm=llm, runs_dir=args.runs_dir,
-                                                            run_manifest=run_manifest)
+                                                            run_manifest=run_manifest, cascade=cascade)
             except ValueError as error:  # an invalid batch or a non-empty runs directory
                 print(f"error: {error}", file=sys.stderr)
                 return 2

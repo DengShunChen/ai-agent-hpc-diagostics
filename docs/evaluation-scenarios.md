@@ -180,6 +180,14 @@ node's job really did hit its time limit, so `scheduler.walltime` is not forbidd
   cross-checked against the trace (a fallback in the trace that the run record lacks counts as incomplete). Diagnoses
   are unchanged; only the run record and the completion count change. Results measured on `eval-freeze-1` are
   not rerun and carry this defect.
+- **Cascade mode (2026-11-12, after the phase-1 comparison on `eval-freeze-1`):** `--reasoning cascade` runs the
+  rules first and hands a case to the LLM agents only when the rules lead with an outcome category
+  (`scheduler.walltime`, `scheduler.signal_termination`, `application.exit_code`, `gpu.unexplained`: how a job
+  ended, not which component caused it). The idea came from what the dev and novel-dev sets showed: on the
+  novel faults the rules lead with exactly these categories. The gate and the final-answer rule were written
+  before any cascade run and were not tuned on scores; the phase-1 evaluation results were not used to shape
+  them. Known limit: a rules miss with no tool-supported hypothesis (SIM-DEV-001) is treated as a refusal and
+  is not handed over. On the dev sets the gate hands over 20 of 38 cases, including 5 the rules already get right.
 - Results on the dev sets after these changes are not an independent test of them. A blind set from the
   same catalog tests unseen instances only; independently designed cases are the stronger test
   ([evaluation-protocol.md](evaluation-protocol.md)).

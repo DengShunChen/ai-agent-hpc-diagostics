@@ -38,6 +38,7 @@ from hpc_agent.simulate.scenario import Labels
 from hpc_agent.runtime.trace import TraceRecorder
 from hpc_agent.safety.secrets import find_credential_like
 from hpc_agent.tools.gateway import build_default_gateway
+from hpc_agent.workflows.cascade import run_cascade
 from hpc_agent.workflows.diagnostic_workflow import run_diagnosis
 
 # Simulated data only: a fixed, published key is fine because nothing real is pseudonymized with it.
@@ -65,6 +66,12 @@ class LogResult(BaseModel):
     # LLM runs: True when triage and every specialist ran on the model (no rules fallback). None for rules runs.
     model_complete: bool | None = None
     fallbacks: list[str] = []  # agents that fell back to rules, with the reason
+    # Cascade runs only (None otherwise): did the rules hand the case to the LLM agents, and was the rules' own
+    # lead correct (so a report can count right->wrong and wrong->right against the rules alone).
+    escalated: bool | None = None
+    rules_top1: bool | None = None
+    rules_seconds: float | None = None
+    ai_seconds: float | None = None
 
 
 def _cited(run, pseudonymizer: Pseudonymizer) -> set[tuple[str, str, int]]:
@@ -153,7 +160,7 @@ def _git(repo: Path) -> dict:
         return {"commit": "unknown", "tags": []}
 
 
-def manifest(directory: Path, llm: ChatLLM | None) -> dict:
+def manifest(directory: Path, llm: ChatLLM | None, cascade: bool = False) -> dict:
     """What a run used, so another person can reproduce or audit it. No secrets: names and hashes only."""
     repo = default_data_root()
     from hpc_agent.runtime.skills import SkillLibrary
@@ -167,7 +174,7 @@ def manifest(directory: Path, llm: ChatLLM | None) -> dict:
         "skills_version": SkillLibrary.load(repo).version(),
         "model": None if llm is None else {"provider": llm.name, "model": llm.model,
                                            "timeout_s": os.environ.get("HPC_AGENT_LLM_TIMEOUT")},
-        "reasoning": "rules" if llm is None else "llm",
+        "reasoning": "rules" if llm is None else "cascade" if cascade else "llm",
         "host": {"python": sys.version.split()[0], "platform": host_platform.platform(), "cpus": os.cpu_count()},
     }
 
@@ -178,13 +185,15 @@ def group_of(fault: str) -> str:
 
 def evaluate_scenarios(
     directory: Path, scopes: Mapping[str, frozenset[str]] | None = None, llm: ChatLLM | None = None,
-    runs_dir: Path | None = None, run_manifest: dict | None = None,
+    runs_dir: Path | None = None, run_manifest: dict | None = None, cascade: bool = False,
 ) -> tuple[list[CaseResult], Summary, list[LogResult]]:
     """Every labelled scenario is a planned case; each one ends as a scored run or a recorded failure.
 
     With runs_dir (which must be new or empty): manifest.json is written before the first case
     (status "running") and finished as "complete" or "interrupted"; progress.jsonl gets one line per
     case as it finishes, so an interrupted batch still shows what ran."""
+    if cascade and llm is None:
+        raise BatchInvalid("a cascade run needs a model for the cases the rules hand over")
     labels = {p.stem: Labels.model_validate_json(p.read_text(encoding="utf-8"))
               for p in sorted((directory / "labels").glob("*.json"))}
     exports = {p.name for p in (directory / "export").iterdir() if p.is_dir()} if (directory / "export").is_dir() else set()
@@ -239,8 +248,12 @@ def evaluate_scenarios(
                     _keep(runs_dir, scenario_id, None, trace, 0.0, error, llm)
                     continue
                 try:
-                    run = run_diagnosis(adapter.load_incident(scenario_id), build_default_gateway(adapter), scopes,
-                                        llm=llm, trace=trace)
+                    if cascade:
+                        run = run_cascade(adapter.load_incident(scenario_id), build_default_gateway(adapter), llm,
+                                          scopes, trace=trace)
+                    else:
+                        run = run_diagnosis(adapter.load_incident(scenario_id), build_default_gateway(adapter),
+                                            scopes, llm=llm, trace=trace)
                 except Exception as error:  # noqa: BLE001 - a failed case is recorded, never dropped
                     seconds = time.monotonic() - started
                     reason = safe_error(error)
@@ -262,9 +275,16 @@ def evaluate_scenarios(
                 recorded = {f.split(":", 1)[0] for f in fallbacks}  # cross-check: the trace is the ground truth
                 fallbacks += [f"{agent}: fell back in the trace but not in the run record"
                               for agent in sorted({e["agent"] for e in trace.events if e["kind"] == "fallback"} - recorded)]
+                c = run.cascade
                 logs.append(LogResult(**{**base, "component_hit": (bool(lead) and bool(faulty & set(lead.components)))
                                          if faulty else None,
-                                         "model_complete": None if llm is None else not fallbacks},
+                                         "model_complete": None if llm is None or (c and not c.escalated)
+                                         else not fallbacks},
+                                      escalated=c.escalated if c else None,
+                                      rules_top1=(c.rules_lead in label.leading_categories
+                                                  if label.leading_categories else None) if c else None,
+                                      rules_seconds=c.rules_seconds if c else None,
+                                      ai_seconds=c.ai_seconds if c else None,
                                       key_lines_cited=len(wanted & cited),
                                       log_searches=sum(t.tool == "get_log_lines" for t in run.tools_invoked),
                                       log_analyses=sum(t.tool == "analyze_logs" for t in run.tools_invoked),
@@ -354,6 +374,27 @@ def write_name_map(directory: Path, scenario_id: str) -> Path:
     return path
 
 
+def _cascade_section(rows: list[LogResult], by_id: dict, planned: int) -> list[str]:
+    """Escalation rate, time per path, and the cascade against the rules alone on the same cases."""
+    escalated = [r for r in rows if r.escalated]
+    pairs = [(r.rules_top1, by_id[r.case_id].leading_correct) for r in rows if r.rules_top1 is not None]
+
+    def median(values: list[float]) -> str:
+        values = sorted(values)
+        return f"{values[len(values) // 2]:.3f} s" if values else "–"
+
+    return ["", "### Cascade (rules first, LLM agents only where the rules lead with an outcome)", "",
+            f"Escalated to the LLM agents: **{len(escalated)} of {len(rows)}** cases that ran ({planned} planned; "
+            "failed cases have no cascade record). Median time: rules "
+            f"{median([r.rules_seconds for r in rows if r.rules_seconds is not None])}, LLM agents on escalated cases "
+            f"{median([r.ai_seconds for r in escalated if r.ai_seconds is not None])}.", "",
+            "Category top-1 against the rules alone on the same cases (the rules' lead is recorded in every cascade run):",
+            "", "| Rules right, cascade right | Rules wrong, cascade right | Rules right, cascade **wrong** "
+            "| Both wrong |", "|---|---|---|---|",
+            f"| {sum(a and b for a, b in pairs)} | {sum(not a and b for a, b in pairs)} "
+            f"| {sum(a and not b for a, b in pairs)} | {sum(not a and not b for a, b in pairs)} |"]
+
+
 def render_log_section(logs: list[LogResult], results: list | None = None) -> str:
     keyed = [r for r in logs if r.key_lines]
     cited = sum(r.key_lines_cited > 0 for r in keyed)
@@ -408,6 +449,9 @@ def render_log_section(logs: list[LogResult], results: list | None = None) -> st
                       "back to rules (failed cases count as not completed). On the completed cases only, category top-1: "
                       f"**{count(clean, lambda r: by_id[r.case_id].leading_correct)}** (a conditional subset, not a "
                       "replacement for the rows above, which include fallback and failed cases)."]
+    cascaded = [r for r in logs if r.escalated is not None]
+    if cascaded and results:
+        lines += _cascade_section(cascaded, {r.case_id: r for r in results}, len(logs))
     kinds = sorted({r.evidence for r in logs if r.evidence})
     if kinds and results:
         top1 = {r.case_id: r.leading_correct for r in results}
