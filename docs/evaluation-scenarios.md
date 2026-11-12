@@ -226,6 +226,11 @@ node's job really did hit its time limit, so `scheduler.walltime` is not forbidd
   and special files are now refused before anything is written, and only regular files are copied. (R4) drill-score
   removed a wrong answer with missing times from the correctness denominator; correctness and time now have
   separate denominators, and an empty answer counts as wrong. None of these changes uses any new-set result.
+  **Acceptance-6 (Codex rejected eval-candidate-8 with two remaining gaps):** (R1b) only the LLM run was inside the
+  fallback boundary, so a failure while merging or in the final check still erased the rules' answer; the whole
+  LLM stage, merge and final check now are (interrupts still propagate). (R3b) a linked `names/` directory passed
+  the leaf check; every path component from the drill input down to a copied file must now be a plain directory
+  or file inside it.
 - Results on the dev sets after these changes are not an independent test of them. A blind set from the
   same catalog tests unseen instances only; independently designed cases are the stronger test
   ([evaluation-protocol.md](evaluation-protocol.md)).

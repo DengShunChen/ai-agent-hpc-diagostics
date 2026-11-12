@@ -97,3 +97,22 @@ def test_links_in_an_export_are_refused_before_any_packet_is_written(drill, tmp_
     with pytest.raises(DrillError, match="links are not allowed"):
         prepare(copy, out, ["E1", "E2"])
     assert not out.exists() or not any(out.rglob("*"))
+
+
+def test_a_linked_names_directory_is_refused(drill, tmp_path):
+    """A plain names file under a linked names/ directory would copy whatever it points at (acceptance-6 R3b)."""
+    import shutil
+
+    sim, _ = drill
+    copy = tmp_path / "sim"
+    shutil.copytree(sim, copy, symlinks=True)
+    shutil.rmtree(copy / "names", ignore_errors=True)
+    hidden = tmp_path / "hidden"
+    hidden.mkdir()
+    for sid in ("SIM-DEV-005", "SIM-DEV-009", "SIM-DEV-011", "SIM-DEV-013"):
+        (hidden / f"{sid}.txt").write_text((copy / "labels" / f"{sid}.json").read_text())
+    (copy / "names").symlink_to(hidden, target_is_directory=True)
+    out = tmp_path / "out"
+    with pytest.raises(DrillError, match="links are not allowed"):
+        prepare(copy, out, ["E1", "E2"])
+    assert not out.exists() or not any(out.rglob("*"))

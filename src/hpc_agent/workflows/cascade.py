@@ -78,10 +78,12 @@ def run_cascade(
 
     started = time.monotonic()
     try:
-        ai = run_diagnosis(incident, gateway, scopes, profile=profile, llm=llm, trace=trace)
+        return _with_llm(incident, gateway, llm, scopes, profile, trace, outcomes, rules, rules_lead, reason,
+                         rules_seconds, started)
     except Exception as error:  # noqa: BLE001 - a failed LLM stage must not erase the rules' checked answer
-        # Budget exhausted, model or guard failure: nothing from the LLM stage is kept, the rules' result is,
-        # and the record says the model did not finish (never counted as a completed model run).
+        # Budget exhausted, model failure, or a failure while merging or verifying the combined record: nothing
+        # from the LLM stage is kept, the rules' already verified result is, and the record says the model did
+        # not finish (never counted as a completed model run). Interrupts (KeyboardInterrupt) still propagate.
         note = f"{type(error).__name__}: {str(error)[:200]}"
         note = type(error).__name__ if find_credential_like(note) else note
         if trace is not None:
@@ -90,6 +92,13 @@ def run_cascade(
             escalated=True, reason=reason + "; the LLM agents did not finish, so the rules' result is kept",
             rules_lead=rules_lead, rules_seconds=rules_seconds, ai_seconds=time.monotonic() - started,
             ai_error=note)})
+
+
+def _with_llm(incident: Incident, gateway: ToolGateway, llm: ChatLLM, scopes: Mapping[str, frozenset[str]],
+              profile: SiteProfile, trace: TraceRecorder | None, outcomes: frozenset[str], rules: DiagnosticRun,
+              rules_lead: str | None, reason: str, rules_seconds: float, started: float) -> DiagnosticRun:
+    """The LLM stage, the merge and the final check; any failure here leaves the rules' result to the caller."""
+    ai = run_diagnosis(incident, gateway, scopes, profile=profile, llm=llm, trace=trace)
     ai_seconds = time.monotonic() - started
     # Causes the LLM agents grounded in tool data (not a rules fallback), in a category that names a cause.
     llm_diagnoses = [d for d in ai.diagnoses if d.reasoning == "llm"]

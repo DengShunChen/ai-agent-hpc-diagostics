@@ -69,16 +69,17 @@ def prepare(directory: Path, out: Path, engineers: list[str], scopes: Mapping[st
         raise DrillError(f"output directory must be new or empty: {out}")
     if cascade and llm is None:
         raise DrillError("a cascade drill needs a model for the cases the rules hand over")
-    if export.is_symlink():
-        raise DrillError("export/ must not be a symbolic link")
+    _no_links(directory, export)
     ids = sorted(p.name for p in export.iterdir() if p.is_dir() and not p.is_symlink())
     if len(ids) < 2:
         raise DrillError("a drill needs at least two scenarios")
     files = {sid: _regular_files(export / sid) for sid in ids}  # checked before anything is written
     names = {sid: directory / "names" / f"{sid}.txt" for sid in ids}
     for path in names.values():
-        if path.is_symlink() or (path.exists() and not path.is_file()):
-            raise DrillError(f"names file must be a regular file: {path.name}")
+        if path.exists() or path.is_symlink():
+            _no_links(directory, path)  # names/ itself, not only the file, must not be a link
+            if not path.is_file():
+                raise DrillError(f"names file must be a regular file: {path.name}")
 
     root = out / "root"
     shutil.copytree(default_data_root() / "knowledge", root / "knowledge")
@@ -129,6 +130,19 @@ def prepare(directory: Path, out: Path, engineers: list[str], scopes: Mapping[st
     _write_csv(out / "assignment.csv", ("engineer", "group", "scenario_id", "half", "arm"), rows)
     assert not any(p.is_symlink() for p in out.rglob("*")), "a drill packet must hold no links"
     return {"scenarios": len(ids), "engineers": len(engineers), "rejected": sorted(report.rejected)}
+
+
+def _no_links(root: Path, path: Path) -> None:
+    """No component from root (exclusive) down to path (inclusive) may be a link: a linked parent directory would
+    make a plain-looking file resolve to labels/ or anywhere else."""
+    rel = path.relative_to(root)
+    current = root
+    for part in rel.parts:
+        current = current / part
+        if current.is_symlink():
+            raise DrillError(f"links are not allowed in a drill input ({current.relative_to(root)})")
+    if not path.resolve().is_relative_to(root.resolve()):
+        raise DrillError(f"drill input escapes its directory ({rel})")
 
 
 def _regular_files(folder: Path) -> list[Path]:

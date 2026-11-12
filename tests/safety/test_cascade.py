@@ -126,3 +126,46 @@ def test_the_second_opinion_is_what_the_report_shows_second_even_when_another_ag
     assert shown[0][0] == "scheduler.signal_termination" and shown[1][0] == run.cascade.ai_lead == "gpu.interconnect"
     assert {d.reasoning for d in run.diagnoses} == {"llm", "rules", "rules-fallback"}  # the record keeps all of them
     verify_run(run, scopes)
+
+
+@pytest.mark.parametrize("where", ["final_guard", "merge"])
+def test_a_failure_while_merging_or_verifying_keeps_the_rules_result(adapter, gateway, scopes, monkeypatch, where):
+    """Any failure after the rules answered, not only in the LLM run itself (acceptance-6 R1b)."""
+    from hpc_agent.safety.guards import SafetyViolation
+    from hpc_agent.workflows import cascade as cascade_module
+
+    real_correlate = cascade_module.RCACoordinator.correlate
+
+    def boom(*_args, **_kwargs):
+        raise SafetyViolation("injected")
+
+    def merge_fails(self, *args, rank=None, **kwargs):  # only the cascade's merge passes a rank
+        if rank is not None:
+            raise RuntimeError("injected")
+        return real_correlate(self, *args, **kwargs)
+
+    if where == "final_guard":
+        monkeypatch.setattr(cascade_module, "verify_run", boom)  # only the cascade's own final check
+    else:
+        monkeypatch.setattr(cascade_module.RCACoordinator, "correlate", merge_fails)
+    llm = scheduler_llm([{"cause": "The node was drained", "category": "node.unhealthy", "confidence": 0.3,
+                          "facts": [DRAIN]}])
+    incident = adapter.load_incident("POC-SCHEDULER-001")
+    run = run_cascade(incident, gateway, llm, scopes)
+    assert run.cascade.escalated and run.cascade.ai_error.endswith("injected") and run.cascade.ai_lead is None
+    assert leading(run) == leading(run_diagnosis(incident, gateway, scopes))
+    assert all(d.reasoning == "rules" for d in run.diagnoses)  # nothing from the LLM stage is kept
+    verify_run(run, scopes)
+
+
+def test_an_interrupt_during_the_llm_stage_is_not_swallowed(adapter, gateway, scopes, monkeypatch):
+    from hpc_agent.workflows import cascade as cascade_module
+
+    def interrupted(*_args, **_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cascade_module, "verify_run", interrupted)
+    llm = scheduler_llm([{"cause": "The node was drained", "category": "node.unhealthy", "confidence": 0.3,
+                          "facts": [DRAIN]}])
+    with pytest.raises(KeyboardInterrupt):
+        run_cascade(adapter.load_incident("POC-SCHEDULER-001"), gateway, llm, scopes)

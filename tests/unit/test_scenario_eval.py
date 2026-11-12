@@ -290,3 +290,17 @@ def test_a_failed_llm_stage_keeps_the_rules_answer_in_the_cascade_tables(tmp_pat
     assert log.escalated is True and log.rules_top1 is not None and log.model_complete is False
     assert any(f.startswith("cascade: LLM stage failed: ToolNotAllowedError") for f in log.fallbacks)
     assert "**1** escalated cases where the model did not finish" in render_log_section(logs, results)
+
+
+def test_a_failed_final_check_keeps_the_rules_answer_in_the_cascade_tables(tmp_path, monkeypatch):
+    from hpc_agent.safety.guards import SafetyViolation
+    from hpc_agent.workflows import cascade as cascade_module
+
+    def guard_fails(*_args, **_kwargs):
+        raise SafetyViolation("injected")
+
+    monkeypatch.setattr(cascade_module, "verify_run", guard_fails)  # the cascade's own final check only
+    results, _, logs = evaluate_scenarios(make(tmp_path, faults=("walltime",)), llm=DownLLM(), cascade=True)
+    (log,), (result,) = logs, results
+    assert not log.error and result.outcome != "failed" and log.rules_top1 is not None
+    assert log.escalated is True and log.model_complete is False
