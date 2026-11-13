@@ -123,6 +123,7 @@ workflow. `hpc-agent diagnose` and the review page run the rule-based agents, or
 place with `HPC_AGENT_REASONING=llm`; the cascade (gate, LLM second opinion, merge) runs in
 `hpc-agent evaluate --reasoning cascade` and `hpc-agent drill-prepare --reasoning cascade`. Dotted lines
 are configuration or records, not data flow. See [docs/architecture.md](docs/architecture.md).
+繁體中文版：[docs/architecture.zh-TW.md](docs/architecture.zh-TW.md).
 
 ## Safety principles
 
