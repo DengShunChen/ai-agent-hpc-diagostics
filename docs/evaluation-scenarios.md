@@ -130,6 +130,11 @@ qwen2.5:7b) on the frozen commit; no paid API. Full report: `~/hpc-eval/independ
 | Escalated / model completed | 12 / 12 | 9 / 9 |
 
 - Cascade machine time for the 21 escalated cases: about 203 minutes in total on CPU.
+- **Claude (claude-opus-5-5) cascade on the same frozen commit and cases** (user-approved, US$5.54, 195 requests):
+  key line quoted 12/12 and 23/23; rules wrong, second opinion right 4/20 (7B: 3/20; both right 1, Claude only 3,
+  7B only 2, neither 14); rules right → cascade wrong 0/15; 21/21 escalated cases completed; about 20 minutes of
+  machine time in total. Top-1 is the rules' 15/35 for both by design, so this is no claim that either model
+  reasons better overall.
 - Log volume (min/median/max per case): new catalog set 557/1,675/3,193 raw log lines, digest 0/2/7 lines, with a key
   line in the digest for 20/23. The hand-written independent cases are small (13/16.5/20 lines). This is data volume,
   not measured reading time.
