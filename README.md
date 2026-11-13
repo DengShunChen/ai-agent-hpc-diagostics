@@ -61,13 +61,68 @@ its own.
 
 ## Architecture
 
-```
-Incident/Alert -> Web UI/API -> Triage Agent -> {Storage, Scheduler, Network, GPU} Agents
-              -> RCA Coordinator -> RCA Assessment -> Recommendations -> Human Approval
+```mermaid
+flowchart TB
+    subgraph IN["1 · Data in, offline files only"]
+        SIM["hpc-agent simulate<br/>synthetic cluster, sim- names,<br/>injected root cause"]
+        EXP["Site export<br/>CSV, raw logs, command output"]
+        IMP["hpc-agent import<br/>contract check, de-identification,<br/>credential scan"]
+        SIM --> IMP
+        EXP --> IMP
+    end
+
+    IMP --> ROOT[("Data root, read-only<br/>fixtures/ · test_data/ · log index · knowledge/")]
+    ROOT --> DA["Read-only data adapter<br/>size limits, credential scan"]
+    DA --> TG["Tool Gateway<br/>allowlisted read-only tools, fail closed<br/>no shell, exec or ssh tools"]
+    TG --> SG["ScopedGateway<br/>each agent gets only the tools<br/>in config/agents/*.md"]
+
+    subgraph RULES["2 · Rule-based agents"]
+        T["Triage agent<br/>classify, pick specialists<br/>no tools"]
+        SP["Specialists<br/>Scheduler PJM/Slurm · Storage FEFS/Lustre<br/>Network · GPU<br/>may consult each other"]
+        C["RCA Coordinator<br/>rank hypotheses, rule out, timeline<br/>never confirms a cause"]
+        T --> SP --> C
+    end
+    SG --> SP
+
+    REM["Remediation agent<br/>playbook proposals with rollback and SOP<br/>no tools, never executes"]
+    GATE{"Cascade gate<br/>rules lead only says<br/>how the job ended?"}
+    C --> GATE
+    GATE -->|"no: a cause, or missing evidence"| REM
+    GATE -->|"yes"| LLMA
+
+    subgraph AI["3 · LLM second opinion"]
+        LLMA["LLM triage and specialists<br/>the model proposes tool calls,<br/>the harness runs them"]
+        CHK["Fact checks<br/>keep only claims grounded in tool data,<br/>log lines quoted verbatim"]
+        MERGE["Merge<br/>the rules' lead stays first,<br/>a checked LLM cause is listed right below"]
+        LLMA --> CHK --> MERGE
+    end
+    SG --> LLMA
+    PROV["Model provider, optional<br/>local Ollama qwen2.5:7b, or Claude:<br/>synthetic or de-identified data only,<br/>outbound scan, spend cap"] -.-> LLMA
+    MERGE --> REM
+
+    REM --> GUARD["Runtime guard verify_run<br/>every fact traces to a tool call"]
+    GUARD --> SAVE["Run saved<br/>AWAITING_HUMAN_APPROVAL"]
+
+    subgraph HUMAN["4 · Humans decide"]
+        UI["Review page, HTTP API or CLI<br/>bearer-token operators"]
+        H{"Operator decision"}
+        UI --> H
+    end
+    SAVE --> UI
+    H -->|"APPROVED"| DONE["Decision recorded<br/>nothing is executed"]
+    H -->|"REJECTED / REVISION_REQUESTED"| REV["Re-diagnosed as a new run"]
+
+    AUD[("audit-data/<br/>hash-chained audit trail and run traces")]
+    SAVE -.-> AUD
+    H -.-> AUD
 ```
 
-All operational data enters through the read-only data adapter and the allowlisted Tool
-Gateway. See [docs/architecture.md](docs/architecture.md).
+Agents read data only through the read-only data adapter and the allowlisted Tool Gateway, and each
+agent's ScopedGateway narrows that to its own tools. The diagnosis runs as a Microsoft Agent Framework
+workflow. `hpc-agent diagnose` and the review page run the rule-based agents, or the LLM agents in their
+place with `HPC_AGENT_REASONING=llm`; the cascade (gate, LLM second opinion, merge) runs in
+`hpc-agent evaluate --reasoning cascade` and `hpc-agent drill-prepare --reasoning cascade`. Dotted lines
+are configuration or records, not data flow. See [docs/architecture.md](docs/architecture.md).
 
 ## Safety principles
 
