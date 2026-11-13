@@ -3,82 +3,227 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>HPC 診斷人工審查</title>
   <link rel="stylesheet" href="/static/app.css">
   <script src="/static/app.js" defer></script>
 </head>
 <body>
-  <header>
-    <h1>HPC/AI 叢集故障診斷：人工審查</h1>
-    <p class="banner">離線 POC &middot; 合成資料 &middot; AI 提出建議，工具提供證據，由人做決定。
-      記錄決定不會執行任何動作。</p>
+  <a class="skip-link" href="#main">跳到主要內容</a>
+
+  <header class="appbar">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 32 32" width="28" height="28" aria-hidden="true">
+        <rect x="1" y="1" width="30" height="30" rx="8" fill="currentColor" opacity="0.14"/>
+        <rect x="7" y="8" width="18" height="4" rx="1.5" fill="currentColor"/>
+        <rect x="7" y="14" width="18" height="4" rx="1.5" fill="currentColor" opacity="0.75"/>
+        <rect x="7" y="20" width="18" height="4" rx="1.5" fill="currentColor" opacity="0.5"/>
+        <circle cx="22" cy="10" r="1.2" fill="#38d39f"/>
+        <circle cx="22" cy="16" r="1.2" fill="#38d39f"/>
+        <circle cx="22" cy="22" r="1.2" fill="#f5b83d"/>
+      </svg>
+      <div class="brand-text">
+        <span class="brand-title">HPC/AI 叢集故障診斷</span>
+        <span class="brand-sub">人工審查主控台</span>
+      </div>
+    </div>
+    <div class="appbar-tags" aria-label="環境">
+      <span class="tag tag-env">離線 POC</span>
+      <span class="tag tag-env">合成資料</span>
+    </div>
+    <div class="session" id="session" hidden>
+      <span class="operator">
+        <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle cx="10" cy="7" r="3.5" fill="currentColor"/><path d="M3 17c.8-3.4 3.6-5 7-5s6.2 1.6 7 5" fill="currentColor"/></svg>
+        <span id="who"></span>
+      </span>
+      <button id="signout" class="btn btn-ghost-inverse" type="button">登出</button>
+    </div>
   </header>
 
-  <section id="login">
-    <label for="token">操作員 token</label>
-    <input id="token" type="password" autocomplete="off" spellcheck="false">
-    <button id="signin" type="button">登入</button>
-    <button id="signout" type="button">登出</button>
-    <span id="who"></span>
+  <div class="principle" role="note">
+    <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M10 1.5 3 4.3v5.2c0 4.3 2.9 7.6 7 9 4.1-1.4 7-4.7 7-9V4.3L10 1.5Z" fill="currentColor" opacity="0.2"/><path d="m6.5 10 2.3 2.3 4.7-4.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <p>AI 提出建議，工具提供證據，由人做決定。記錄決定不會執行任何動作。</p>
+  </div>
+
+  <div id="message" class="toast" role="status" aria-live="polite"></div>
+
+  <section id="login" class="login" aria-labelledby="login-title">
+    <div class="login-card">
+      <h1 id="login-title">登入審查主控台</h1>
+      <p class="login-lead">檢視 Agent 的診斷、證據與處置建議，並記錄人工決定。平台只讀取資料，不會對叢集執行任何動作。</p>
+      <label class="field-label" for="token">操作員 token</label>
+      <input id="token" class="input" type="password" autocomplete="off" spellcheck="false"
+             placeholder="貼上管理者核發的 token">
+      <button id="signin" class="btn btn-primary btn-block" type="button">登入</button>
+      <ul class="login-notes">
+        <li>token 只保存在這個分頁的工作階段，關閉分頁即清除。</li>
+        <li>每一筆決定都會連同操作員身分寫入 hash 串鏈稽核紀錄。</li>
+      </ul>
+    </div>
   </section>
 
-  <p id="message" role="status"></p>
+  <div id="workspace" class="workspace" hidden>
+    <aside class="sidebar" aria-label="事件與診斷紀錄">
+      <section class="panel">
+        <div class="panel-head">
+          <h2>事件</h2>
+          <span class="count" id="incident-count"></span>
+        </div>
+        <ul id="incidents" class="incident-list"></ul>
+      </section>
+      <section class="panel">
+        <div class="panel-head">
+          <h2>診斷紀錄</h2>
+          <span class="count" id="run-count"></span>
+          <button id="refresh" class="btn btn-icon" type="button" aria-label="重新整理診斷紀錄" title="重新整理">
+            <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M16 10a6 6 0 1 1-1.8-4.3M16 3.5v3.4h-3.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+        <ul id="runs" class="run-list"></ul>
+      </section>
+    </aside>
 
-  <main id="workspace" hidden>
-    <section>
-      <h2>事件</h2>
-      <ul id="incidents"></ul>
-    </section>
-    <section>
-      <h2>診斷紀錄</h2>
-      <button id="refresh" type="button">重新整理</button>
-      <table>
-        <thead><tr><th>Run</th><th>事件</th><th>狀態</th><th>更新時間</th><th></th></tr></thead>
-        <tbody id="runs"></tbody>
-      </table>
-    </section>
-    <section id="review" hidden>
-      <h2>審查 <span id="review-run"></span></h2>
-      <p><strong>狀態：</strong><span id="review-status"></span>
-         &middot; <strong>分類：</strong><span id="review-class"></span>
-         &middot; <strong>整體信心度：</strong><span id="review-confidence"></span></p>
-      <h3>摘要</h3><p id="review-summary"></p>
-      <h3>假設（未確認）</h3><ul id="review-hypotheses"></ul>
-      <h3>處置計畫（處置 Agent）</h3>
-      <p id="review-remediation"></p>
-      <div id="review-actions"></div>
-      <h4>暫緩的假設</h4><ul id="review-deferred"></ul>
-      <h3>Agent 推理方式</h3><ul id="review-agents"></ul>
-      <details id="review-trace-box"><summary>AI 執行過程（每一步：提示、模型回覆、工具呼叫與權限判定、規則檢查）</summary>
-        <ol id="review-trace"></ol></details>
-      <h4>被規則駁回的 AI 提案（不是發現，僅供參考）</h4><ul id="review-discarded"></ul>
-      <h3>缺少的資訊</h3><ul id="review-missing"></ul>
-      <h3>建議檢查</h3><ul id="review-checks"></ul>
-      <p class="note" id="review-note"></p>
-
-      <h3>AI 說明（本機 LLM）</h3>
-      <div class="ai">
-        <button id="explain" type="button">產生 AI 說明</button>
-        <span id="ai-meta"></span>
-        <p id="ai-text"></p>
-        <ul id="ai-reasons"></ul>
-        <p class="ai-disclaimer" id="ai-disclaimer"></p>
+    <main id="main" class="main" tabindex="-1">
+      <div id="empty" class="empty">
+        <svg viewBox="0 0 64 64" width="56" height="56" aria-hidden="true"><rect x="10" y="8" width="44" height="48" rx="6" fill="currentColor" opacity="0.08"/><rect x="18" y="18" width="28" height="4" rx="2" fill="currentColor" opacity="0.35"/><rect x="18" y="28" width="22" height="4" rx="2" fill="currentColor" opacity="0.25"/><rect x="18" y="38" width="25" height="4" rx="2" fill="currentColor" opacity="0.25"/></svg>
+        <h2>選擇一筆診斷紀錄開始審查</h2>
+        <p>從左側的診斷紀錄開啟審查，或對事件開始一次新的診斷。</p>
       </div>
 
-      <h3>決定</h3>
-      <div class="decision">
-        <select id="decision">
-          <option value="APPROVED">核准</option>
-          <option value="REJECTED">退回</option>
-          <option value="REVISION_REQUESTED">要求修改</option>
-        </select>
-        <textarea id="comment" maxlength="1000" placeholder="說明（退回或要求修改時必填）"></textarea>
-        <button id="decide" type="button">記錄決定</button>
-        <button id="close" type="button">結案（核准後）</button>
-        <button id="revise" type="button">重新診斷（退回後）</button>
-      </div>
-      <h3>歷程</h3><ol id="history"></ol>
-    </section>
-  </main>
+      <article id="review" class="review" hidden>
+        <header class="review-head card">
+          <p class="eyebrow">審查 <span id="review-run" class="mono"></span></p>
+          <h2 id="review-title" class="review-title"></h2>
+          <div class="review-meta">
+            <span id="review-status" class="pill"></span>
+            <span class="meta-item"><span class="meta-label">分類</span><span id="review-class" class="chip"></span></span>
+            <span class="meta-item meta-confidence">
+              <span class="meta-label">整體信心度</span>
+              <meter id="review-meter" min="0" max="1" value="0"></meter>
+              <span id="review-confidence" class="num"></span>
+            </span>
+            <span class="chip chip-caution">根因未確認・需人工審查</span>
+          </div>
+          <nav class="section-nav" aria-label="審查段落">
+            <a href="#sec-summary">摘要</a>
+            <a href="#sec-hypotheses">假設</a>
+            <a href="#sec-plan">處置計畫</a>
+            <a href="#sec-gaps">證據缺口</a>
+            <a href="#sec-ai">AI 紀錄</a>
+            <a href="#sec-explain">AI 說明</a>
+            <a href="#rail" class="nav-decision">人工決定</a>
+          </nav>
+        </header>
+
+        <section id="sec-summary" class="card" aria-labelledby="h-summary">
+          <h3 id="h-summary" class="card-title">摘要</h3>
+          <p id="review-summary" class="prose"></p>
+        </section>
+
+        <section id="sec-hypotheses" class="card" aria-labelledby="h-hypotheses">
+          <h3 id="h-hypotheses" class="card-title">假設<span class="title-tag">未確認</span></h3>
+          <p class="card-hint">依信心度排序。這些是待驗證的假設，不是已確認的根因。</p>
+          <ol id="review-hypotheses" class="hypotheses"></ol>
+        </section>
+
+        <section id="sec-plan" class="card" aria-labelledby="h-plan">
+          <h3 id="h-plan" class="card-title">處置計畫<span class="title-tag title-tag-muted">處置 Agent</span></h3>
+          <p id="review-remediation" class="card-hint"></p>
+          <div id="review-actions" class="actions"></div>
+          <h4 class="sub-title">暫緩的假設</h4>
+          <ul id="review-deferred" class="deferred"></ul>
+        </section>
+
+        <section id="sec-gaps" class="card" aria-labelledby="h-gaps">
+          <h3 id="h-gaps" class="card-title">證據缺口</h3>
+          <div class="two-col">
+            <div>
+              <h4 class="sub-title">缺少的資訊</h4>
+              <ul id="review-missing" class="bullets"></ul>
+            </div>
+            <div>
+              <h4 class="sub-title">建議檢查</h4>
+              <ul id="review-checks" class="bullets bullets-check"></ul>
+            </div>
+          </div>
+        </section>
+
+        <section id="sec-ai" class="card" aria-labelledby="h-ai">
+          <h3 id="h-ai" class="card-title">AI 推理與執行紀錄</h3>
+          <h4 class="sub-title">Agent 推理方式</h4>
+          <ul id="review-agents" class="agents"></ul>
+          <h4 class="sub-title">被規則駁回的 AI 提案<span class="title-tag title-tag-muted">不是發現，僅供參考</span></h4>
+          <ul id="review-discarded" class="bullets bullets-muted"></ul>
+          <details id="review-trace-box" class="trace-box">
+            <summary>AI 執行過程（每一步：提示、模型回覆、工具呼叫與權限判定、規則檢查）</summary>
+            <ol id="review-trace" class="trace"></ol>
+          </details>
+        </section>
+
+        <section id="sec-explain" class="card card-ai" aria-labelledby="h-explain">
+          <div class="card-title-row">
+            <h3 id="h-explain" class="card-title">AI 說明<span class="title-tag title-tag-muted">本機 LLM</span></h3>
+            <button id="explain" class="btn btn-secondary" type="button">產生 AI 說明</button>
+          </div>
+          <p id="ai-meta" class="card-hint"></p>
+          <p id="ai-text" class="prose ai-text"></p>
+          <ul id="ai-reasons" class="bullets bullets-muted"></ul>
+          <p id="ai-disclaimer" class="ai-disclaimer"></p>
+        </section>
+      </article>
+    </main>
+
+    <aside id="rail" class="rail" aria-label="人工決定" hidden>
+      <section class="card decision-card" aria-labelledby="h-decision">
+        <h3 id="h-decision" class="card-title">人工決定</h3>
+        <div class="rail-status">
+          <span class="meta-label">目前狀態</span>
+          <span id="rail-status" class="pill"></span>
+        </div>
+        <p id="decision-state" class="decision-state" hidden></p>
+        <fieldset class="segmented" id="decision-group">
+          <legend class="field-label">決定</legend>
+          <label class="seg-option">
+            <input type="radio" name="decision" value="APPROVED" checked>
+            <span class="seg-body"><span class="seg-title">核准</span><span class="seg-desc">接受這份評估</span></span>
+          </label>
+          <label class="seg-option">
+            <input type="radio" name="decision" value="REJECTED">
+            <span class="seg-body"><span class="seg-title">退回</span><span class="seg-desc">評估不成立</span></span>
+          </label>
+          <label class="seg-option">
+            <input type="radio" name="decision" value="REVISION_REQUESTED">
+            <span class="seg-body"><span class="seg-title">要求修改</span><span class="seg-desc">補充後重新診斷</span></span>
+          </label>
+        </fieldset>
+        <div id="comment-box">
+          <label class="field-label" for="comment">說明<span id="comment-required" class="required" hidden>必填</span><span id="comment-optional" class="optional" hidden>選填</span></label>
+          <textarea id="comment" class="input textarea" maxlength="1000" rows="4" placeholder="說明理由（退回或要求修改時必填）"></textarea>
+          <div class="field-foot"><span id="comment-count">0 / 1000</span></div>
+        </div>
+        <p class="note" id="review-note"></p>
+        <button id="decide" class="btn btn-primary btn-block" type="button">記錄決定</button>
+        <div class="rail-secondary">
+          <button id="close" class="btn btn-secondary btn-block" type="button">結案</button>
+          <button id="revise" class="btn btn-secondary btn-block" type="button">重新診斷</button>
+        </div>
+        <p class="hint">可用的操作依目前狀態顯示，伺服器仍會再次檢查。</p>
+      </section>
+      <section class="card" aria-labelledby="h-history">
+        <h3 id="h-history" class="card-title">歷程</h3>
+        <ol id="history" class="timeline"></ol>
+      </section>
+    </aside>
+  </div>
+
+  <dialog id="confirm" class="dialog" aria-labelledby="confirm-title">
+    <h2 id="confirm-title" class="dialog-title">確認記錄決定</h2>
+    <p id="confirm-text" class="dialog-text"></p>
+    <p class="dialog-note">這筆決定會連同你的操作員身分寫入稽核紀錄，無法修改。本平台不會執行任何動作。</p>
+    <div class="dialog-actions">
+      <button id="confirm-cancel" class="btn btn-secondary" type="button">取消</button>
+      <button id="confirm-ok" class="btn btn-primary" type="button">確認記錄</button>
+    </div>
+  </dialog>
 </body>
 </html>
