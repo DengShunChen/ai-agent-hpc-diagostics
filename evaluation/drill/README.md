@@ -25,6 +25,19 @@ step after it, and the live pilot remains the only evidence about MTTR.
   measures the system the award entry describes. Not changed after seeing any drill data.
 - Scored as: median minutes per arm and share of correct answers per arm, reported together.
 
+## Decided before any drill answer was collected (2026-11-13)
+
+- Three engineers take part: E1, E2, E3 (sessions on 2026-11-18 and 2026-11-19). E4 is worked by the POC developer,
+  who co-wrote the fault catalog and knows how the agent's report reads. E4's answers are reported on a row of
+  their own ("developer self-test"), never pooled with E1–E3 and never used for a claim. The main result is
+  `drill-score` on the sheets of E1, E2 and E3 only; E4's sheet is scored on its own against the same labels.
+- The developer works E4 only after the three engineer sessions (from 2026-11-20), so the person running the
+  sessions has not worked through the scenarios.
+- With three engineers the groups are uneven (group 1: E1, E3; group 2: E2). Each arm still gets 18 answers
+  (3 × 12 / 2), but half A's scenarios are answered without the agent twice as often as with it, and half B's the
+  other way round, so a difference in difficulty between the halves would show up as a difference between the arms.
+  This is reported with the result.
+
 ## Steps (facilitator)
 
 The facilitator is **not** the developer of the agents: the developer must not see the blind set's labels or
@@ -74,7 +87,8 @@ logs before the drill (Codex or the drill owner runs steps 1, 2 and 5).
    ```
 
    `drill-summary.md` gives median minutes and the share of correct answers per arm, side by side: a faster
-   wrong answer is not an improvement. With 4 engineers × 12 scenarios there are 24 answers per arm.
+   wrong answer is not an improvement. With 4 engineers × 12 scenarios there are 24 answers per arm
+   (18 in the 2026-11 drill, which has three engineers in the main comparison; see above).
 
 Engineers get `engineer-guide.zh-TW.md` (instructions in Traditional Chinese).
 
