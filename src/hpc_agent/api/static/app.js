@@ -147,13 +147,128 @@ function checkItem(text) {
   return li;
 }
 
-function traceLine(e) {
-  const { seq, at, agent, kind, ...detail } = e;
-  const text = JSON.stringify(detail);
-  const li = el("li");
-  li.append(el("span", agent, "trace-agent"), el("span", TRACE_KIND[kind] || kind, "trace-kind"),
-            el("span", text.length > 400 ? text.slice(0, 400) + "…" : text, "trace-detail"));
-  return li;
+// --- AI trace: one readable line per step, the full text folded below it ------------------------
+
+const TOOL_STATUS = { ok: "成功", error: "錯誤", withheld: "已扣留", no_data: "無資料" };
+const MAX_DETAIL = 20000;
+
+const clip = (text, n) => (text.length > n ? `${text.slice(0, n)}…` : text);
+const fmtValue = (v) => (typeof v === "string" ? v : JSON.stringify(v));
+const fmtArgs = (args) => Object.entries(args || {}).map(([k, v]) => `${k}=${fmtValue(v)}`).join(", ");
+const fmtCall = (c) => `${c.name}(${fmtArgs(c.arguments)})`;
+
+function pretty(text) {
+  try { return JSON.stringify(JSON.parse(text), null, 2); } catch { return text; }
+}
+
+function detailBlock(parts) {
+  const box = el("details", undefined, "step-detail");
+  box.append(el("summary", "顯示完整內容"));
+  parts.forEach(([title, text]) => {
+    if (title) box.append(el("div", title, "step-detail-title"));
+    box.append(el("pre", clip(text, MAX_DETAIL), "step-pre"));
+  });
+  return box;
+}
+
+function badge(text, tone) { return el("span", text, `step-badge tone-${tone}`); }
+
+function replySummary(content) {
+  try {
+    const data = JSON.parse(content);
+    if (data && typeof data.finding === "string") return `結論草稿：${clip(data.finding, 160)}`;
+    if (data && Array.isArray(data.domains)) return `領域：${data.domains.map((d) => d.domain).join("、")}`;
+  } catch { /* not JSON: show the text */ }
+  return content ? clip(content, 160) : "（空白回覆）";
+}
+
+function stepContent(e) {
+  const main = el("div", undefined, "step-main");
+  const line = el("p", undefined, "step-summary");
+  main.append(line);
+  const add = (text, className) => line.append(className ? el("span", text, className) : document.createTextNode(text));
+  switch (e.kind) {
+    case "prompt": {
+      const tools = e.tools || [];
+      add(tools.length ? `可用工具 ${tools.length} 個：${tools.join("、")}` : "不使用工具");
+      main.append(detailBlock([["系統提示", e.system || ""], ["使用者訊息", e.user || ""]]));
+      break;
+    }
+    case "model_reply": {
+      const round = e.round === "final-json" ? "最終 JSON" : `第 ${e.round} 輪`;
+      add(round, "step-round");
+      const calls = e.tool_calls || [];
+      if (calls.length) add(`要求呼叫 ${calls.map(fmtCall).join("、")}`, "step-code");
+      else {
+        add(replySummary(e.content || ""));
+        if (e.content) main.append(detailBlock([[null, pretty(e.content)]]));
+      }
+      break;
+    }
+    case "tool_call": {
+      line.append(e.decision === "allowed" ? badge("允許", "ok") : badge("拒絕", "bad"));
+      add(`${e.tool}(${fmtArgs(e.requested)})`, "step-code");
+      if (e.reason) main.append(el("p", `原因：${e.reason}`, "step-note"));
+      const extra = Object.keys(e.used || {}).filter((k) => k !== "incident_id"
+        && fmtValue(e.used[k]) !== fmtValue((e.requested || {})[k]));
+      if (extra.length) main.append(el("p", `harness 實際使用：${fmtArgs(e.used)}`, "step-note"));
+      break;
+    }
+    case "tool_result": {
+      const tone = { ok: "ok", error: "bad", withheld: "warn" }[e.status] || "muted";
+      line.append(badge(TOOL_STATUS[e.status] || e.status, tone));
+      add(`${e.ref ? `${e.ref} · ` : ""}${e.tool}`, "step-code");
+      if (e.source) main.append(el("p", e.source, "step-source"));
+      if (e.reason) main.append(el("p", `原因：${e.reason}`, "step-note"));
+      break;
+    }
+    case "checks": {
+      if (e.classification !== undefined) {
+        add(`保留：${(e.kept || []).join("、") || "無"}；規則補上：${(e.added_by_rules || []).join("、") || "無"}；分類：${e.classification}`);
+      } else {
+        add(`保留 ${(e.kept || []).length} 項、駁回 ${(e.discarded || []).length} 項、證據 ${(e.evidence || []).length} 筆`);
+        main.append(detailBlock([["保留", (e.kept || []).join("\n") || "無"],
+          ["駁回", (e.discarded || []).join("\n") || "無"], ["證據", (e.evidence || []).join("\n") || "無"]]));
+      }
+      break;
+    }
+    case "fallback":
+      add(`改用規則：${e.reason || ""}`);
+      break;
+    default: {
+      const { seq, at, agent, kind, ...detail } = e;
+      add(clip(fmtArgs(detail), 300));
+    }
+  }
+  return main;
+}
+
+function traceGroups(trace) {
+  const groups = [];
+  trace.forEach((e) => {
+    const last = groups[groups.length - 1];
+    if (last && last.agent === e.agent) last.events.push(e);
+    else groups.push({ agent: e.agent, events: [e] });
+  });
+  return groups.map((g) => {
+    const box = el("details", undefined, "trace-group");
+    box.open = true;
+    const count = (kind, pred = () => true) => g.events.filter((e) => e.kind === kind && pred(e)).length;
+    const denied = count("tool_call", (e) => e.decision !== "allowed");
+    const head = el("summary", undefined, "trace-group-head");
+    head.append(el("span", g.agent, "agent-name"),
+      el("span", `${count("model_reply")} 次模型回覆 · ${count("tool_call")} 次工具呼叫（拒絕 ${denied}）· ${count("tool_result")} 筆工具結果`,
+         "trace-stats"));
+    const steps = el("ol", undefined, "trace-steps");
+    g.events.forEach((e, i) => {
+      const li = el("li", undefined, `step step-${e.kind}`);
+      li.append(el("span", String(i + 1), "step-no"), el("span", TRACE_KIND[e.kind] || e.kind, `step-kind k-${e.kind}`),
+                stepContent(e));
+      steps.append(li);
+    });
+    box.append(head, steps);
+    return box;
+  });
 }
 
 // --- session -----------------------------------------------------------------------------
@@ -453,8 +568,8 @@ async function openReview(runId) {
     fillList("review-checks", review.recommended_checks, checkItem);
     fillList("review-agents", review.agents || [], agentItem);
     fillList("review-discarded", review.discarded_proposals || []);
-    $("review-trace").replaceChildren(...(trace.length ? trace.map(traceLine)
-      : [noneItem("沒有 AI 執行紀錄（規則式診斷）")]));
+    $("review-trace").replaceChildren(...(trace.length ? traceGroups(trace)
+      : [el("p", "沒有 AI 執行紀錄（規則式診斷）", "trace-empty")]));
     $("review-note").textContent = reviewNote(review);
     $("history").replaceChildren(...(history.length ? history.map(historyItem) : [noneItem()]));
     applyAllowed(review.status);
